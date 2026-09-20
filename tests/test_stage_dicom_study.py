@@ -67,7 +67,7 @@ def test_scan_rejects_mixed_studies(tmp_path):
     write_dicom(folder / "a.dcm", generate_uid(), generate_uid())
     write_dicom(folder / "b.dcm", generate_uid(), generate_uid())
 
-    with pytest.raises(RuntimeError, match="exactly one StudyInstanceUID"):
+    with pytest.raises(RuntimeError, match="exactly one MR StudyInstanceUID"):
         scan(folder)
 
 
