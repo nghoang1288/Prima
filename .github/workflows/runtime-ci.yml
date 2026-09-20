@@ -22,6 +22,24 @@ jobs:
           python -m pip install --upgrade pip
           pip install -r requirements-dev.txt
 
+      - name: Verify deployment lock snapshot
+        run: |
+          python - <<'PY'
+          from importlib.metadata import version
+          expected = {
+              "torch": "2.14.0",
+              "monai": "1.6.0",
+              "numpy": "2.4.6",
+              "scipy": "1.17.1",
+              "SimpleITK": "2.5.6",
+              "pydicom": "3.0.2",
+              "transformers": "4.49.0",
+          }
+          for package, wanted in expected.items():
+              got = version(package)
+              assert got == wanted, f"{package}: expected {wanted}, got {got}"
+          PY
+
       - name: Compile Python sources
         run: |
           python -m compileall -q tools Prima_training_and_evaluation end-to-end_inference_pipeline
