@@ -28,7 +28,13 @@ TAGS = [
     "SeriesNumber",
     "Modality",
     "StudyDescription",
+    "SOPClassUID",
 ]
+
+ANCILLARY_SOP_CLASSES = {
+    "1.2.840.10008.5.1.4.1.1.7": "SC",
+    "1.2.840.10008.5.1.4.1.1.104.1": "DOC",
+}
 
 
 def safe_read(path: Path):
@@ -78,11 +84,23 @@ def scan(source: Path):
         modality = str(getattr(ds, "Modality", "") or "").upper()
         description = str(getattr(ds, "StudyDescription", "") or "").strip()
         raw_series_number = getattr(ds, "SeriesNumber", None)
+        sop_class = str(getattr(ds, "SOPClassUID", "") or "")
 
         if not study_uid or not series_uid:
             continue
         if modality != "MR":
             skipped_modalities[modality or "<blank>"] += 1
+            continue
+
+        ancillary_label = ANCILLARY_SOP_CLASSES.get(sop_class)
+        if not ancillary_label:
+            if sop_class.startswith("1.2.840.10008.5.1.4.1.1.88."):
+                ancillary_label = "SR"
+            elif sop_class.startswith("1.2.840.10008.5.1.4.1.1.11."):
+                ancillary_label = "PR"
+
+        if ancillary_label:
+            skipped_modalities[ancillary_label] += 1
             continue
 
         try:
