@@ -13,6 +13,7 @@ prima_model_config: "configs/sample_prima_config.json"
 batch_size: 1
 device: "cuda"
 stream_dicom: true
+fail_on_series_error: true
 low_vram: true
 visual_dtype: "float16"
 prune_inference_only: true
