@@ -446,6 +446,16 @@ class ModelLoader:
                 if not quantize_cpu_heads:
                     return
 
+                # Head modules are also registered in ModuleLists by the
+                # historical model class. Clear those alias references before
+                # replacement quantization so the old FP32 module can be freed
+                # immediately after each dictionary entry is replaced.
+                for registry_name in (
+                    'm1', 'm2', 'diagnosis_modules', 'referral_modules'
+                ):
+                    if hasattr(full_model, registry_name):
+                        setattr(full_model, registry_name, torch.nn.ModuleList())
+
                 quantizer_name = 'torchao'
                 try:
                     from torchao.quantization import (
@@ -478,6 +488,7 @@ class ModelLoader:
                         quantized = _quantize_one(head)
                         quantized.thresh = thresh
                         collection[name] = [quantized, idx]
+                        del head
                         logging.info(
                             'INT8-quantized CPU head %s/%s via %s',
                             collection_name, name, quantizer_name,
