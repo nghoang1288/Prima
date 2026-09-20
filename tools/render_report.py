@@ -87,6 +87,83 @@ REFERRAL_LABELS_VI = {
     "nl-general": "Thần kinh tổng quát",
 }
 
+DIAGNOSIS_GROUP_LABELS_VI = {
+    "vascular_ischemic": "Mạch máu — thiếu máu não",
+    "vascular_hemorrhagic": "Mạch máu — xuất huyết",
+    "vascular_malformation": "Mạch máu — dị dạng mạch",
+    "tumor": "Khối u",
+    "infectious_inflammatory": "Nhiễm trùng / viêm",
+    "trauma": "Chấn thương",
+    "structural": "Cấu trúc / biến đổi nhu mô",
+    "sellar": "Vùng yên — trên yên",
+    "cyst": "Nang",
+    "developmental": "Bất thường phát triển",
+    "ventricular": "Não thất / dịch não tủy",
+    "surgical": "Sau phẫu thuật / can thiệp",
+    "spine": "Tủy sống",
+    "other": "Khác",
+}
+
+DIAGNOSIS_GROUP_ORDER = [
+    "vascular_ischemic",
+    "vascular_hemorrhagic",
+    "vascular_malformation",
+    "tumor",
+    "infectious_inflammatory",
+    "trauma",
+    "structural",
+    "sellar",
+    "cyst",
+    "developmental",
+    "ventricular",
+    "surgical",
+    "spine",
+    "other",
+]
+
+
+def diagnosis_group(code: str) -> str:
+    normalized = normalize_code(code)
+    if normalized.startswith("vascular_ischemic_"):
+        return "vascular_ischemic"
+    if normalized.startswith("vascular_hemorrhagic_"):
+        return "vascular_hemorrhagic"
+    if normalized.startswith("vascular_malformation_"):
+        return "vascular_malformation"
+    if normalized.startswith("tumor_"):
+        return "tumor"
+    if normalized.startswith("infectious_") or normalized.startswith("inflammatory_"):
+        return "infectious_inflammatory"
+    if normalized.startswith("trauma_"):
+        return "trauma"
+    if normalized.startswith("structural_"):
+        return "structural"
+    if normalized.startswith("sellar_"):
+        return "sellar"
+    if normalized.startswith("cyst_"):
+        return "cyst"
+    if normalized.startswith("developmental_"):
+        return "developmental"
+    if normalized.startswith("ventricular_"):
+        return "ventricular"
+    if normalized.startswith("surgical_"):
+        return "surgical"
+    if normalized.startswith("spine_"):
+        return "spine"
+    return "other"
+
+
+def grouped_diagnoses(rows):
+    grouped = {key: [] for key in DIAGNOSIS_GROUP_ORDER}
+    for name, score in rows:
+        grouped[diagnosis_group(name)].append((name, score))
+    return {
+        key: grouped[key]
+        for key in DIAGNOSIS_GROUP_ORDER
+        if grouped[key]
+    }
+
+
 
 def scalar(value: Any) -> float:
     if isinstance(value, (int, float)):
@@ -188,89 +265,115 @@ def build_markdown(
     tech = technical_summary(metrics)
 
     if language == "vi":
+        grouped_positive = grouped_diagnoses(d_pos)
+        grouped_near = grouped_diagnoses(d_near)
+
+        priority_text = "Không có dữ liệu triage"
+        if p_decision:
+            p_name, _p_score = p_decision
+            priority_text = PRIORITY_VI.get(
+                normalize_code(p_name),
+                label_for(p_name, language),
+            )
+
         lines = [
-            f"# PRIMA MRI Brain — {study_id}",
+            f"# PRIMA — Tóm tắt MRI não — {study_id}",
             "",
-            "> **Lưu ý:** Đây là đầu ra hỗ trợ nghiên cứu của PRIMA, không phải chẩn đoán xác định. "
-            "Diagnosis/referral là **margin so với ngưỡng mô hình**; priority dùng score tương đối để lấy argmax. "
-            "Các score này không phải phần trăm xác suất bệnh. Các diagnosis là những task nhị phân độc lập, "
-            "vì vậy có thể có nhiều nhãn cùng vượt ngưỡng.",
+            "> **Mục đích:** hỗ trợ bác sĩ CĐHA rà soát study ở mức phân loại toàn bộ ca. "
+            "PRIMA không định khu tổn thương và không thay thế việc đọc ảnh.",
             "",
-            "## Mức ưu tiên",
+            "## Đọc nhanh",
+            "",
+            f"- **Triage của mô hình:** {priority_text}",
+            f"- **Nhãn chẩn đoán vượt ngưỡng:** {len(d_pos)}",
+            f"- **Nhãn sát ngưỡng cần lưu ý:** {len(d_near)}",
+            f"- **Gợi ý chuyên khoa vượt ngưỡng:** {len(r_pos)}",
             "",
         ]
-        if p_decision:
-            p_name, p_score = p_decision
-            lines.append(
-                f"**{PRIORITY_VI.get(normalize_code(p_name), label_for(p_name, language))}** "
-                f"(score {fmt_margin(p_score)})"
-            )
-        else:
-            lines.append("_Không có đầu ra priority._")
 
-        lines += ["", "## Chẩn đoán — đầu ra vượt ngưỡng", ""]
-        if d_pos:
-            for name, score in d_pos:
-                lines.append(
-                    f"- **{label_for(name, language)}** — margin `{fmt_margin(score)}`  "
-                    f"<small>({name})</small>"
-                )
+        lines += [
+            "## Các nhãn PRIMA vượt ngưỡng",
+            "",
+            "> Đây là các **study-level flags** của mô hình. Một ca có thể có nhiều nhãn cùng vượt ngưỡng; "
+            "không nên diễn giải chúng như một kết luận CĐHA hoàn chỉnh.",
+            "",
+        ]
+        if grouped_positive:
+            for group_key, rows in grouped_positive.items():
+                lines += [f"### {DIAGNOSIS_GROUP_LABELS_VI[group_key]}", ""]
+                for name, _score in rows:
+                    lines.append(f"- **{label_for(name, language)}**")
+                lines.append("")
         else:
-            lines.append("_Không có diagnosis output nào vượt ngưỡng 0._")
+            lines += [
+                "_Không có nhãn PRIMA nào vượt ngưỡng 0._",
+                "",
+                "**Lưu ý:** điều này không đồng nghĩa MRI bình thường.",
+                "",
+            ]
 
-        lines += ["", f"## Chẩn đoán — gần ngưỡng âm (0 đến -{near_margin:g})", ""]
-        if d_near:
-            for name, score in d_near:
-                lines.append(
-                    f"- {label_for(name, language)} — margin `{fmt_margin(score)}`  "
-                    f"<small>({name})</small>"
-                )
-        else:
-            lines.append("_Không có._")
+        if grouped_near:
+            lines += [
+                "## Các nhãn sát ngưỡng — nên nhìn lại ảnh nếu phù hợp lâm sàng",
+                "",
+            ]
+            for group_key, rows in grouped_near.items():
+                lines += [f"### {DIAGNOSIS_GROUP_LABELS_VI[group_key]}", ""]
+                for name, _score in rows:
+                    lines.append(f"- {label_for(name, language)}")
+                lines.append("")
 
-        lines += ["", "## Gợi ý chuyển chuyên khoa — vượt ngưỡng", ""]
+        lines += ["## Gợi ý hội chẩn / chuyên khoa", ""]
         if r_pos:
-            for name, score in r_pos:
-                lines.append(
-                    f"- **{label_for(name, language)}** — margin `{fmt_margin(score)}`  "
-                    f"<small>({name})</small>"
-                )
+            for name, _score in r_pos:
+                lines.append(f"- **{label_for(name, language)}**")
         else:
-            lines.append("_Không có referral output nào vượt ngưỡng 0._")
+            lines.append("_Không có referral head nào vượt ngưỡng._")
 
         if r_near:
-            lines += ["", f"### Chuyển chuyên khoa gần ngưỡng âm (0 đến -{near_margin:g})", ""]
-            for name, score in r_near:
+            lines += ["", "### Referral sát ngưỡng", ""]
+            for name, _score in r_near:
+                lines.append(f"- {label_for(name, language)}")
+
+        lines += [
+            "",
+            "## Giới hạn cần nhớ khi đọc kết quả",
+            "",
+            "- PRIMA chỉ trả về **nhãn ở mức toàn study**; không cho biết vị trí tổn thương.",
+            "- Không cung cấp kích thước, số lượng, laterality, đặc điểm T1/T2/FLAIR/DWI/ADC/SWI hay kiểu ngấm thuốc.",
+            "- Score của diagnosis/referral là margin so với ngưỡng mô hình, **không phải xác suất bệnh**.",
+            "- Không có nhãn vượt ngưỡng **không loại trừ** bất thường trên MRI.",
+            "- Kết quả nên dùng như một danh sách gợi ý để rà lại ảnh, không dùng thay báo cáo CĐHA.",
+            "",
+        ]
+
+        if show_all_scores:
+            lines += ["## Chi tiết mô hình", ""]
+            lines += ["### Diagnosis", ""]
+            for name, score in d_pos + d_near + d_neg:
                 lines.append(
                     f"- {label_for(name, language)} — margin `{fmt_margin(score)}`  "
                     f"<small>({name})</small>"
                 )
-
-        if show_all_scores:
-            lines += ["", "## Toàn bộ score", "", "### Diagnosis", ""]
-            for name, score in d_pos + d_near + d_neg:
-                lines.append(f"- {name}: `{fmt_margin(score)}`")
             lines += ["", "### Referral", ""]
             for name, score in r_pos + r_near + r_neg:
-                lines.append(f"- {name}: `{fmt_margin(score)}`")
+                lines.append(
+                    f"- {label_for(name, language)} — margin `{fmt_margin(score)}`  "
+                    f"<small>({name})</small>"
+                )
             lines += ["", "### Priority", ""]
             for name, score in sorted_scores(priority):
                 lines.append(f"- {name}: `{fmt_margin(score)}`")
+            lines.append("")
 
-        lines += ["", "## Thông tin kỹ thuật", ""]
+        lines += ["## Thông tin kỹ thuật", ""]
         if tech:
             lines.append(f"- Series xử lý: **{tech['series_count']}**")
             lines.append(f"- Series lỗi/bị bỏ: **{tech['skipped_series_count']}**")
             if tech.get("total_seconds") is not None:
                 lines.append(f"- Tổng thời gian: **{tech['total_seconds']:.1f} giây**")
-            if tech.get("tokenizer_seconds") is not None:
-                lines.append(f"- Tokenizer: {tech['tokenizer_seconds']:.1f} giây")
-            if tech.get("prima_seconds") is not None:
-                lines.append(f"- PRIMA inference: {tech['prima_seconds']:.1f} giây")
             if tech.get("gpu_name"):
                 lines.append(f"- GPU: {tech['gpu_name']}")
-            if tech.get("tokenizer_chunk_limit") is not None:
-                lines.append(f"- Tokenizer chunk limit: {tech['tokenizer_chunk_limit']}")
         else:
             lines.append("_Không có runtime metrics._")
 
@@ -278,8 +381,8 @@ def build_markdown(
             "",
             "---",
             "",
-            "Raw machine output được giữ riêng trong file `*_predictions.json`. "
-            "CLIP embedding không hiển thị trong báo cáo này.",
+            "Chi tiết score/mã task được ẩn khỏi phần đọc nhanh. "
+            "Raw output vẫn được giữ riêng trong file `*_predictions.json` để máy xử lý.",
         ]
         return "\n".join(lines) + "\n"
 
