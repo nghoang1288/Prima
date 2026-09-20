@@ -500,13 +500,15 @@ class HierViT(nn.Module):
         if not hasattr(self.innerViT,"dim"):
             self.innerViT.dim = 289
 
-        # batch process serienamevecs
-        serienameencoded = self.dummy_param.new_zeros(
-            (len(lens), len(lenss), self.innerViT.dim)
-        )
-        for j in range(len(lens)):
-            serienamevecs = xdict['serienames'][j][0:lens[j]]
-            serienameencoded[j][0:lens[j]] = self.serieencoder(serienamevecs)
+        # Batch-process series-name embeddings only when the checkpoint uses them.
+        serienameencoded = None
+        if self.useseriename:
+            serienameencoded = self.dummy_param.new_zeros(
+                (len(lens), len(lenss), self.innerViT.dim)
+            )
+            for j in range(len(lens)):
+                serienamevecs = xdict['serienames'][j][0:lens[j]]
+                serienameencoded[j][0:lens[j]] = self.serieencoder(serienamevecs)
 
         totalimgs = lens.sum(
         )  # totalimgs is total number of series over the batch
@@ -570,18 +572,18 @@ class HierViT(nn.Module):
         if hasattr(self, 'getserieemb') and self.getserieemb:
             return self.outerViT({
                 'visual': nextx,
-                'lens': lens.to(mydevice)
+                'lens': outer_lens.to(mydevice)
             },
                                  retpool=retpool), outs
         if hasattr(self, 'retboth') and self.retboth:
             return self.outerViT({
                 'visual': nextx,
-                'lens': lens.to(mydevice)
+                'lens': outer_lens.to(mydevice)
             },
                                  retboth=True)
         return self.outerViT({
             'visual': nextx,
-            'lens': lens.to(mydevice)
+            'lens': outer_lens.to(mydevice)
         },
                              retpool=retpool)
 
@@ -589,11 +591,13 @@ class HierViT(nn.Module):
     def make_no_flashattn(self) -> None:
         self.innerViT.make_no_flashattn()
         self.outerViT.make_no_flashattn()
-        try:
-            self.serieencoder.make_no_flashattn()
-        except:
-            self.serieencoder[0].make_no_flashattn()
-        self.studyencoder.make_no_flashattn()
+        if hasattr(self, 'serieencoder'):
+            try:
+                self.serieencoder.make_no_flashattn()
+            except (AttributeError, TypeError):
+                self.serieencoder[0].make_no_flashattn()
+        if hasattr(self, 'studyencoder'):
+            self.studyencoder.make_no_flashattn()
 
 
 # the clip objsctive
