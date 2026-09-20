@@ -6,3 +6,10 @@ configs/test_pipeline_config_2.yaml
 output/
 configs/local_*.yaml
 *.local.yaml
+[Tt]est/
+*.dcm
+*.DCM
+*.ima
+*.IMA
+*.dicom
+*.DICOM
