@@ -76,12 +76,29 @@ def main() -> None:
             report["warnings"].append(
                 "8 GB-class GPU detected: use low_vram=true and keep compile_visual=false for the first run."
             )
+
+        smi = report.get("nvidia_smi")
+        if smi:
+            try:
+                first_line = smi.splitlines()[0]
+                fields = [field.strip() for field in first_line.split(",")]
+                driver_major = int(fields[1].split(".")[0])
+                report["nvidia_driver_major"] = driver_major
+                if torch.version.cuda and torch.version.cuda.startswith("13.") and driver_major < 580:
+                    report["warnings"].append(
+                        "CUDA 13.x runtime detected with NVIDIA driver <580. "
+                        "Update the Windows NVIDIA driver before running PRIMA."
+                    )
+            except (ValueError, IndexError):
+                report["warnings"].append(
+                    "Could not parse NVIDIA driver version from nvidia-smi."
+                )
     else:
         report["warnings"].append(
             "CUDA is not available to PyTorch. On Windows, run PRIMA inside WSL2 with a current NVIDIA Windows driver."
         )
 
-    if report["torch"] != "2.14.0":
+    if not str(report["torch"]).startswith("2.14.0"):
         report["warnings"].append(
             "This branch is CI-tested on PyTorch 2.14.0."
         )
