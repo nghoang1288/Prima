@@ -659,7 +659,9 @@ class Pipeline:
             img.unsqueeze(0) for img in patched
         ]
 
-        series_name_tensors = [chartovec(name) for name in series_names]
+        series_name_tensors = [
+            chartovec(name, max_length=200) for name in series_names
+        ]
         max_name_len = max(len(t) for t in series_name_tensors)
         serienames_tensor = torch.zeros(
             len(series_name_tensors), max_name_len, dtype=torch.long
@@ -673,7 +675,9 @@ class Pipeline:
             "lenss": serie_lenss,
             "hash": ["study_0"],
             "serienames": serienames_tensor.unsqueeze(0),
-            "studydescription": chartovec(self.config.study_description).unsqueeze(0),
+            "studydescription": chartovec(
+                self.config.study_description, max_length=200
+            ).unsqueeze(0),
         }
 
     @staticmethod
