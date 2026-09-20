@@ -1,4 +1,7 @@
-from tools.render_report import build_markdown, markdown_to_html
+import json
+from pathlib import Path
+
+from tools.render_report import LABELS_VI, build_markdown, markdown_to_html
 
 
 def sample_predictions():
@@ -74,3 +77,18 @@ def test_technical_metrics_are_rendered_without_source_paths():
     assert "NVIDIA GeForce RTX 4060" in markdown
     assert "37.0 giây" in markdown
     assert "<redacted>" not in markdown
+
+
+def test_vietnamese_map_covers_all_52_published_diagnoses():
+    repo_root = Path(__file__).resolve().parents[1]
+    config = json.loads(
+        (
+            repo_root
+            / "Prima_training_and_evaluation"
+            / "configs"
+            / "jsons"
+            / "prospective_eval.json"
+        ).read_text()
+    )
+    assert len(config) == 52
+    assert set(LABELS_VI) == set(config)
