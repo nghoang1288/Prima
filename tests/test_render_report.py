@@ -1,7 +1,7 @@
 import json
 from pathlib import Path
 
-from tools.render_report import (DIAGNOSIS_LABELS_VI, REFERRAL_LABELS_VI, build_markdown, markdown_to_html)
+from tools.render_report import (DIAGNOSIS_LABELS_VI, REFERRAL_LABELS_VI, build_markdown, markdown_to_html, render_reports)
 
 
 def sample_predictions():
@@ -102,3 +102,21 @@ def test_vietnamese_map_covers_all_15_checkpoint_referrals():
         "nl-oncology", "nl-trauma", "nl-stroke", "nl-general",
     }
     assert set(REFERRAL_LABELS_VI) == expected
+
+
+def test_render_reports_writes_local_md_and_html(tmp_path):
+    md_path, html_path = render_reports(
+        sample_predictions(),
+        study_id="CASE001",
+        output_dir=tmp_path,
+        language="vi",
+    )
+
+    assert md_path.name == "CASE001_report.md"
+    assert html_path.name == "CASE001_report.html"
+    assert md_path.exists()
+    assert html_path.exists()
+    assert "clip_emb" not in md_path.read_text(encoding="utf-8")
+    html_text = html_path.read_text(encoding="utf-8")
+    assert "<!doctype html>" in html_text.lower()
+    assert "CASE001" in html_text
