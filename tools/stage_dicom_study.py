@@ -32,14 +32,26 @@ TAGS = [
 
 
 def safe_read(path: Path):
+    kwargs = {
+        "stop_before_pixels": True,
+        "specific_tags": TAGS,
+    }
     try:
-        return pydicom.dcmread(
-            str(path),
-            stop_before_pixels=True,
-            specific_tags=TAGS,
-            force=False,
-        )
-    except (InvalidDicomError, OSError, ValueError):
+        return pydicom.dcmread(str(path), force=False, **kwargs)
+    except InvalidDicomError:
+        # Some PACS exports omit the 128-byte preamble/DICM marker while still
+        # carrying valid DICOM tags. Retry permissively, then require the UIDs
+        # below before accepting the file.
+        try:
+            ds = pydicom.dcmread(str(path), force=True, **kwargs)
+            if not getattr(ds, "StudyInstanceUID", None):
+                return None
+            if not getattr(ds, "SeriesInstanceUID", None):
+                return None
+            return ds
+        except (OSError, ValueError):
+            return None
+    except (OSError, ValueError):
         return None
 
 
@@ -88,6 +100,8 @@ def scan(source: Path) -> Tuple[Dict[str, List[Path]], str, str]:
             + ", ".join(sorted(nonempty_modalities))
         )
 
+    # A study should normally have one StudyDescription. If exporters copied
+    # inconsistent values across instances, leave it blank rather than guessing.
     description = (
         next(iter(study_descriptions))
         if len(study_descriptions) == 1
