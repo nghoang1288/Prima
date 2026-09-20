@@ -1,0 +1,10 @@
+{
+  "agent_id": "antigravity-windows-01",
+  "repo": "LOCAL_ONLY_PATH",
+  "runtime_root": "LOCAL_ONLY_PATH",
+  "cases": {
+    "CASE001": {
+      "source": "LOCAL_ONLY_PATIENT_PATH"
+    }
+  }
+}
