@@ -540,7 +540,9 @@ class HierViT(nn.Module):
                         theserielastdim] = theserie  # leave extra space for serie encoding
                     counter += 1
                     slens.append(slen + extra)
-        slens = torch.LongTensor(slens).to(mydevice)
+        slens = torch.stack(slens).to(
+            device=mydevice, dtype=torch.long
+        )
 
         innerraw, outs = self.innerViT({
             'visual': newx,
