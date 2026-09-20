@@ -1,0 +1,4 @@
+-r requirements-runtime.txt
+# Optional: preferred CPU task-head quantizer when compatible with the
+# installed PyTorch build. Runtime falls back to torch.ao dynamic INT8.
+torchao>=0.17,<0.19
