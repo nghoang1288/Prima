@@ -440,6 +440,14 @@ class Pipeline:
         dataset = MrVoxelDataset([image])
         tokens, meta = dataset[0]
         original_token_count = int(tokens.shape[0])
+        # Preserve the upstream series-inclusion rule before any optimized
+        # Otsu prefiltering. Otherwise optimized mode could include a >5000
+        # patch series that baseline/stock would skip.
+        if original_token_count > 5000:
+            raise RuntimeError(
+                f"Too many raw tokens for {series_name}: "
+                f"{original_token_count} > 5000"
+            )
 
         if self.config.prefilter_otsu_before_vq and original_token_count:
             useids, positions, selected_percent = select_otsu_indices(
