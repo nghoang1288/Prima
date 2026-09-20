@@ -480,12 +480,18 @@ class ModelLoader:
                             module, {torch.nn.Linear}, dtype=torch.qint8, inplace=False
                         )
 
+                quantized_by_object_id = {}
                 for collection_name in ('diagnosisheads', 'referralheads'):
                     collection = getattr(full_model, collection_name, {})
                     for name, item in list(collection.items()):
                         head, idx = item
                         thresh = getattr(head, 'thresh', 0.0)
-                        quantized = _quantize_one(head)
+                        object_id = id(head)
+                        if object_id in quantized_by_object_id:
+                            quantized = quantized_by_object_id[object_id]
+                        else:
+                            quantized = _quantize_one(head)
+                            quantized_by_object_id[object_id] = quantized
                         quantized.thresh = thresh
                         collection[name] = [quantized, idx]
                         del head
