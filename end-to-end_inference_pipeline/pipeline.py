@@ -65,6 +65,7 @@ class PipelineConfig:
     low_vram: bool = False
     visual_dtype: str = "float16"
     log_cuda_memory: bool = True
+    disable_flash_attention: bool = True
 
     @classmethod
     def from_dict(cls, config_dict: Dict[str, Any]) -> 'PipelineConfig':
@@ -456,8 +457,16 @@ class Pipeline:
             if self.prima_model is None:
                 self.prima_model = self.load_full_prima_model()
             self._log_cuda_memory("PRIMA ready")
-            if hasattr(self.prima_model, 'make_no_flashattn'):
+            if (
+                self.config.disable_flash_attention
+                and hasattr(self.prima_model, 'make_no_flashattn')
+            ):
+                self.logger.info("Disabling FlashAttention by configuration")
                 self.prima_model.make_no_flashattn()
+            elif not self.config.disable_flash_attention:
+                self.logger.info(
+                    "FlashAttention is allowed; model code will fall back automatically if unavailable"
+                )
 
             # Run inference (autocast for memory and speed on L40S)
             device_type = 'cuda' if 'cuda' in str(self.config.device) else 'cpu'
