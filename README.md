@@ -148,3 +148,8 @@ For detailed instructions, please see the `README.md` file within each folder.
 ## Data statement
 
 Due to privacy and regulations, we are unable to release raw MRIs from UM-220K. For demonstration purposes, we included scripts for generating fake data (random tensors of the same size as real data) which the model can run on. We use skull-stripped real MRIs on our [Demo Website](https://prima.mlins.org) for protection of patient privacy, although raw data without skull stripping was used for inference and prediction.
+
+
+## Modern low-VRAM inference fork
+
+This fork contains an experimental modern inference runtime aimed at single-study workstation inference, including an RTX 4060 8 GB profile. See [MODERN_RUNTIME.md](MODERN_RUNTIME.md). The original research/training path remains available and should be used when reproducing the paper.
