@@ -59,6 +59,8 @@ class PipelineConfig:
     max_tokens_per_chunk: int = 128
     device: str = "cuda" if torch.cuda.is_available() else "cpu"
 
+    tokenizer_encoder_only: bool = True
+    tokenizer_dtype: str = "float16"
     stream_dicom: bool = False
     low_vram: bool = False
     visual_dtype: str = "float16"
@@ -104,6 +106,7 @@ class Pipeline:
         os.environ["PRIMA_ATTENTION_BACKEND"] = self.config.attention_backend
 
         self.tokenizer_model: Optional[torch.nn.Module] = None
+        self._tokenizer_encoder_only = False
         self.prima_model: Optional[torch.nn.Module] = None
         self.patchifier = MedicalImagePatchifier(in_dim=256)
 
@@ -210,14 +213,52 @@ class Pipeline:
         self.logger.info("Loaded %d series", len(mri_study))
         return mri_study, series_list
 
+    @staticmethod
+    def _dtype_from_name(name: str) -> torch.dtype:
+        mapping = {
+            "float16": torch.float16,
+            "fp16": torch.float16,
+            "bfloat16": torch.bfloat16,
+            "bf16": torch.bfloat16,
+            "float32": torch.float32,
+            "fp32": torch.float32,
+        }
+        try:
+            return mapping[name.lower()]
+        except KeyError as exc:
+            raise ValueError(f"Unsupported dtype: {name}") from exc
+
     def load_tokenizer_model(self) -> torch.nn.Module:
         if self.tokenizer_model is None:
             started = time.perf_counter()
             tokenizer_config = self._load_config_file_or_dict(
                 self.config.tokenizer_model_config
             )
-            self.tokenizer_model = ModelLoader.load_vqvae_model(tokenizer_config)
-            self.tokenizer_model = self.tokenizer_model.to(self._device()).eval()
+            vqvae = ModelLoader.load_vqvae_model(tokenizer_config)
+
+            use_encoder_only = (
+                self.config.tokenizer_encoder_only
+                and self._device().type == "cuda"
+                and hasattr(vqvae, "encoder")
+            )
+            dtype = self._dtype_from_name(self.config.tokenizer_dtype)
+
+            if use_encoder_only:
+                encoder = vqvae.encoder
+                del vqvae
+                gc.collect()
+                self.tokenizer_model = encoder.to(
+                    device=self._device(), dtype=dtype
+                ).eval()
+                self._tokenizer_encoder_only = True
+                self.logger.info(
+                    "Loaded VQ-VAE encoder only on %s/%s",
+                    self._device(), self.config.tokenizer_dtype,
+                )
+            else:
+                self.tokenizer_model = vqvae.to(self._device()).eval()
+                self._tokenizer_encoder_only = False
+
             self._stage_done("load_tokenizer", started)
             self._log_memory("VQ-VAE loaded")
         return self.tokenizer_model
@@ -275,11 +316,20 @@ class Pipeline:
             with torch.inference_mode():
                 if amp_enabled:
                     with torch.amp.autocast(
-                        device_type="cuda", dtype=torch.float16
+                        device_type="cuda",
+                        dtype=self._dtype_from_name(self.config.tokenizer_dtype),
                     ):
-                        emb = vqvae.encode(chunk)
+                        emb = (
+                            vqvae(chunk)
+                            if self._tokenizer_encoder_only
+                            else vqvae.encode(chunk)
+                        )
                 else:
-                    emb = vqvae.encode(chunk)
+                    emb = (
+                        vqvae(chunk)
+                        if self._tokenizer_encoder_only
+                        else vqvae.encode(chunk)
+                    )
             embeddings.append(emb.detach().cpu())
             del chunk, emb
         return torch.cat(embeddings, dim=0)
@@ -472,13 +522,28 @@ class Pipeline:
         }
 
     @staticmethod
-    def _move_to_device(obj: Any, device: torch.device) -> Any:
+    def _move_to_device(
+        obj: Any,
+        device: torch.device,
+        floating_dtype: Optional[torch.dtype] = None,
+    ) -> Any:
         if isinstance(obj, torch.Tensor):
-            return obj.to(device, non_blocking=True)
+            dtype = (
+                floating_dtype
+                if floating_dtype is not None and obj.is_floating_point()
+                else obj.dtype
+            )
+            return obj.to(device=device, dtype=dtype, non_blocking=True)
         if isinstance(obj, list):
-            return [Pipeline._move_to_device(item, device) for item in obj]
+            return [
+                Pipeline._move_to_device(item, device, floating_dtype)
+                for item in obj
+            ]
         if isinstance(obj, dict):
-            return {k: Pipeline._move_to_device(v, device) for k, v in obj.items()}
+            return {
+                k: Pipeline._move_to_device(v, device, floating_dtype)
+                for k, v in obj.items()
+            }
         return obj
 
     @staticmethod
@@ -507,7 +572,14 @@ class Pipeline:
             series_names=series_names,
             all_ser_emb_meta=all_ser_emb_meta,
         )
-        prima_input = self._move_to_device(prima_input, self._device())
+        input_dtype = (
+            self._dtype_from_name(self.config.visual_dtype)
+            if self.config.low_vram and self._device().type == "cuda"
+            else None
+        )
+        prima_input = self._move_to_device(
+            prima_input, self._device(), floating_dtype=input_dtype
+        )
         self._stage_done("prepare_prima_input", prep_started)
 
         model = self.load_full_prima_model()
