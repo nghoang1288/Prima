@@ -321,9 +321,7 @@ class ModelLoader:
             else:
                 vqvae_kwargs["num_channels"] = channel_values
 
-            vqvae_model = VQVAE(**vqvae_kwargs)
-
-            # Load pretrained weights if checkpoint path is provided
+            # Load pretrained weights if checkpoint path is provided.
             if 'ckpt_path' in params and params['ckpt_path']:
                 model_path = Path(params['ckpt_path'])
                 if not model_path.exists():
@@ -347,9 +345,31 @@ class ModelLoader:
                         map_location="cpu",
                         weights_only=True,
                     )
-                vqvae_model.load_state_dict(pl_sd)
+
+                # Avoid allocating a full random CPU model before replacing all
+                # parameters with checkpoint tensors. PyTorch 2.14 supports
+                # meta-device construction plus assign=True state loading.
+                try:
+                    with torch.device("meta"):
+                        vqvae_model = VQVAE(**vqvae_kwargs)
+                    vqvae_model.load_state_dict(pl_sd, assign=True)
+                    logging.info(
+                        "Loaded VQ-VAE via meta-device + assign=True"
+                    )
+                except Exception as exc:
+                    logging.warning(
+                        "Meta-device VQ-VAE load unavailable (%s); "
+                        "falling back to normal CPU construction",
+                        exc,
+                    )
+                    vqvae_model = VQVAE(**vqvae_kwargs)
+                    try:
+                        vqvae_model.load_state_dict(pl_sd, assign=True)
+                    except TypeError:
+                        vqvae_model.load_state_dict(pl_sd)
             else:
                 logging.info("Initializing new VQVAE model with random weights")
+                vqvae_model = VQVAE(**vqvae_kwargs)
 
             return vqvae_model
             
