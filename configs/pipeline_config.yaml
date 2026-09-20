@@ -35,3 +35,7 @@ log_cuda_memory: true
 # Reduce this if the VQ-VAE tokenizer itself runs out of VRAM.
 # 128 is a conservative starting point for an 8 GB GPU.
 max_tokens_per_chunk: 128
+
+# Keep FlashAttention enabled when available. The PRIMA attention code falls
+# back automatically when flash-attn is not installed/supported.
+disable_flash_attention: false
