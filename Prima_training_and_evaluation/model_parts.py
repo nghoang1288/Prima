@@ -158,7 +158,12 @@ class Attention(nn.Module):
                         scale=self.scale,
                         window_size=(-1, 0) if self.causal else (-1, -1),
                     )
-                except (RuntimeError, NotImplementedError, ValueError):
+                except torch.OutOfMemoryError:
+                    # OOM is a capacity problem, not a backend capability miss.
+                    # Retrying another attention implementation can worsen peak
+                    # memory and obscure the actual 8 GB limit.
+                    raise
+                except (RuntimeError, NotImplementedError, ValueError, TypeError):
                     if os.environ.get('PRIMA_ATTENTION_BACKEND', 'auto').lower() == 'native':
                         raise
                     backend = 'flash' if flash_attn_varlen_qkvpacked_func is not None else 'sdpa'
