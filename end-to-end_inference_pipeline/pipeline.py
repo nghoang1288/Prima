@@ -149,6 +149,8 @@ class Pipeline:
 
         self.tokenizer_model: Optional[torch.nn.Module] = None
         self._tokenizer_encoder_only = False
+        self._tokenizer_runtime_chunk_size: Optional[int] = None
+        self._last_tokenizer_chunk_size: Optional[int] = None
         self.prima_model: Optional[torch.nn.Module] = None
         self.patchifier = MedicalImagePatchifier(in_dim=256)
 
@@ -413,7 +415,11 @@ class Pipeline:
 
         embeddings: List[torch.Tensor] = []
         amp_enabled = self._device().type == "cuda"
-        chunk_size = min(self.config.max_tokens_per_chunk, int(tokens.shape[0]))
+        configured_chunk = (
+            self._tokenizer_runtime_chunk_size
+            or self.config.max_tokens_per_chunk
+        )
+        chunk_size = min(configured_chunk, int(tokens.shape[0]))
         cursor = 0
 
         while cursor < tokens.shape[0]:
@@ -469,8 +475,15 @@ class Pipeline:
                     new_chunk_size,
                 )
                 chunk_size = new_chunk_size
+                self._tokenizer_runtime_chunk_size = new_chunk_size
 
-        self.metrics["tokenizer_effective_chunk_size"] = chunk_size
+        self._last_tokenizer_chunk_size = chunk_size
+        previous_min = self.metrics.get("tokenizer_min_effective_chunk_size")
+        self.metrics["tokenizer_min_effective_chunk_size"] = (
+            chunk_size
+            if previous_min is None
+            else min(previous_min, chunk_size)
+        )
         return torch.cat(embeddings, dim=0)
 
     def _tokenize_series(
@@ -522,6 +535,7 @@ class Pipeline:
                 "name": display_name,
                 "tokens_before_otsu": original_token_count,
                 "tokens_encoded": int(tokens.shape[0]),
+                "effective_chunk_size": self._last_tokenizer_chunk_size,
                 "seconds": elapsed,
                 "cpu_rss_gib": self._rss_gib(),
                 **self._cuda_snapshot(),
