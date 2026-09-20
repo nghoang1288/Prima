@@ -445,6 +445,7 @@ class ModelLoader:
         visual_dtype: str = 'float16',
         quantize_cpu_heads: bool = False,
         head_quant_backend: str = 'torch_dynamic',
+        prune_inference_only: bool = True,
         compile_visual: bool = False,
         compile_mode: str = 'default',
     ) -> torch.nn.Module:
@@ -473,6 +474,28 @@ class ModelLoader:
             }
             if visual_dtype.lower() not in dtype_map:
                 raise ValueError(f'Unsupported visual_dtype: {visual_dtype}')
+
+            def _prune_inference_state(full_model: torch.nn.Module) -> None:
+                """Drop training/text-side objects not used by FullMRIModel.forward.
+
+                Historical checkpoints often retain the full CLIP object even
+                though inference calls only clipvisualmodel. The visual module
+                is registered separately, so deleting clipmodel releases the
+                text encoder, criterion and training patchifier while retaining
+                the exact same visual module object.
+                """
+                if not prune_inference_only:
+                    return
+
+                clipmodel = getattr(full_model, 'clipmodel', None)
+                visual = getattr(full_model, 'clipvisualmodel', None)
+                if clipmodel is not None and visual is not None:
+                    clip_visual = getattr(clipmodel, 'visual_model', None)
+                    if clip_visual is visual:
+                        delattr(full_model, 'clipmodel')
+                        logging.info(
+                            'Pruned unused full CLIP/text model from inference state'
+                        )
 
             def _quantize_heads(full_model: torch.nn.Module) -> None:
                 if not quantize_cpu_heads:
@@ -569,6 +592,8 @@ class ModelLoader:
             def _place_model(full_model: torch.nn.Module) -> torch.nn.Module:
                 if hasattr(full_model, 'module'):
                     full_model = full_model.module
+
+                _prune_inference_state(full_model)
 
                 if low_vram and target_device.type == 'cuda':
                     full_model.cpu().eval()
