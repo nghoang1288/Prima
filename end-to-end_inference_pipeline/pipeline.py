@@ -57,6 +57,7 @@ class PipelineConfig:
     study_description: str
     study_id: Optional[str] = None
     redact_source_path: bool = True
+    redact_series_names: bool = True
 
     batch_size: int = 1
     num_workers: int = 0
@@ -195,6 +196,11 @@ class Pipeline:
         if self.config.redact_source_path:
             data["study_dir"] = "<redacted>"
         return data
+
+    def _series_display_name(self, index: int, actual_name: str) -> str:
+        if self.config.redact_series_names:
+            return f"series_{index:04d}"
+        return actual_name
 
     def _setup_logging(self) -> None:
         log_file = self.output_dir / "pipeline.log"
@@ -472,8 +478,10 @@ class Pipeline:
         image: sitk.Image,
         series_name: str,
         vqvae: torch.nn.Module,
+        display_name: Optional[str] = None,
     ) -> Tuple[torch.Tensor, Dict[str, Any]]:
         started = time.perf_counter()
+        display_name = display_name or series_name
         dataset = MrVoxelDataset([image])
         tokens, meta = dataset[0]
         original_token_count = int(tokens.shape[0])
@@ -482,7 +490,7 @@ class Pipeline:
         # patch series that baseline/stock would skip.
         if original_token_count > 5000:
             raise RuntimeError(
-                f"Too many raw tokens for {series_name}: "
+                f"Too many raw tokens for {display_name}: "
                 f"{original_token_count} > 5000"
             )
 
@@ -500,7 +508,7 @@ class Pipeline:
             meta["_prima_selected_percent"] = selected_percent
             self.logger.info(
                 "Pre-VQ Otsu filter series=%s threshold=%d before=%d after=%d",
-                series_name,
+                display_name,
                 selected_percent,
                 original_token_count,
                 len(tokens),
@@ -511,7 +519,7 @@ class Pipeline:
 
         self.metrics["series"].append(
             {
-                "name": series_name,
+                "name": display_name,
                 "tokens_before_otsu": original_token_count,
                 "tokens_encoded": int(tokens.shape[0]),
                 "seconds": elapsed,
@@ -521,7 +529,7 @@ class Pipeline:
         )
         self.logger.info(
             "Tokenized series %s: encoded %d/%d patches in %.2fs",
-            series_name,
+            display_name,
             tokens.shape[0],
             original_token_count,
             elapsed,
@@ -546,8 +554,14 @@ class Pipeline:
         try:
             for idx, image in enumerate(mri_study):
                 name = series_names[idx] if series_names is not None else f"series_{idx}"
+                display_name = self._series_display_name(idx, name)
                 try:
-                    emb, meta = self._tokenize_series(image, name, vqvae)
+                    emb, meta = self._tokenize_series(
+                        image,
+                        name,
+                        vqvae,
+                        display_name=display_name,
+                    )
                 except torch.OutOfMemoryError:
                     raise
                 except Exception as exc:
@@ -557,12 +571,12 @@ class Pipeline:
                             "fail_on_series_error=true"
                         ) from exc
                     self.metrics["skipped_series"].append(
-                        {"index": idx, "name": name, "reason": str(exc)}
+                        {"index": idx, "name": display_name, "reason": str(exc)}
                     )
                     self.logger.warning(
                         "Skipping series index=%s name=%s: %s",
                         idx,
-                        name,
+                        display_name,
                         exc,
                         exc_info=True,
                     )
@@ -598,8 +612,14 @@ class Pipeline:
                     fail_on_error=self.config.fail_on_series_error,
                 )
             ):
+                display_name = self._series_display_name(idx, name)
                 try:
-                    emb, meta = self._tokenize_series(image, name, vqvae)
+                    emb, meta = self._tokenize_series(
+                        image,
+                        name,
+                        vqvae,
+                        display_name=display_name,
+                    )
                 except torch.OutOfMemoryError:
                     raise
                 except Exception as exc:
@@ -660,7 +680,7 @@ class Pipeline:
                     )
                     self.logger.info(
                         "Otsu series=%s threshold=%d before=%d after=%d",
-                        series_names[i],
+                        self._series_display_name(i, series_names[i]),
                         percent,
                         len(series_embeddings[i]),
                         len(embs),
@@ -669,7 +689,9 @@ class Pipeline:
                     if len(embspos) > 25:
                         break
                 if chosen is None:
-                    raise RuntimeError(f"Could not filter series {series_names[i]}")
+                    raise RuntimeError(
+                        f"Could not filter {self._series_display_name(i, series_names[i])}"
+                    )
                 filtered_embeddings.append(chosen[0])
                 coords.append(chosen[1])
             series_embeddings = filtered_embeddings
