@@ -20,8 +20,10 @@ tokenizer_dtype: "float16"
 max_tokens_per_chunk: 96
 attention_backend: "auto"
 
-# Biggest RAM optimization. TorchAO is preferred; PyTorch dynamic INT8 is fallback.
+# Biggest RAM optimization. For CPU heads, PyTorch dynamic INT8 is the
+# conservative default; TorchAO 0.18 remains an A/B experimental backend.
 quantize_cpu_heads: true
+head_quant_backend: "torch_dynamic"
 
 # Leave compile off for the first real case. Enable only after baseline metrics
 # show stable shapes and enough VRAM headroom.
