@@ -13,6 +13,10 @@ device: "cuda"
 stream_dicom: true
 low_vram: true
 visual_dtype: "float16"
+
+# Only VQ-VAE encoder is needed by PRIMA. Keep decoder/codebook off GPU.
+tokenizer_encoder_only: true
+tokenizer_dtype: "float16"
 max_tokens_per_chunk: 96
 attention_backend: "auto"
 
