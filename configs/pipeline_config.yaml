@@ -19,3 +19,19 @@ prima_model_config: "configs/sample_prima_config.json"
 # batch_size: 1
 # device: "cuda"
 # num_workers: 0
+
+# Low-VRAM single-study mode.
+# Keeps all diagnosis/referral/priority heads in system RAM and moves only
+# the PRIMA visual backbone to the GPU.
+low_vram: true
+
+# Visual backbone precision in low-VRAM mode.
+# RTX 20/30/40 series: float16 is the safest default.
+visual_dtype: "float16"
+
+# Log allocated/reserved/peak CUDA memory at each pipeline stage.
+log_cuda_memory: true
+
+# Reduce this if the VQ-VAE tokenizer itself runs out of VRAM.
+# 128 is a conservative starting point for an 8 GB GPU.
+max_tokens_per_chunk: 128
