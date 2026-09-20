@@ -69,6 +69,29 @@ def main() -> None:
         "sign_flips_at_zero": total_flips,
     }
 
+    if "clip_emb" in a and "clip_emb" in b:
+        emb_a = np.asarray(a["clip_emb"], dtype=np.float64).reshape(-1)
+        emb_b = np.asarray(b["clip_emb"], dtype=np.float64).reshape(-1)
+        if emb_a.shape != emb_b.shape:
+            report["clip_embedding"] = {
+                "shape_match": False,
+                "baseline_shape": list(emb_a.shape),
+                "candidate_shape": list(emb_b.shape),
+            }
+        else:
+            denom = np.linalg.norm(emb_a) * np.linalg.norm(emb_b)
+            cosine = (
+                float(np.dot(emb_a, emb_b) / denom)
+                if denom > 0
+                else float("nan")
+            )
+            report["clip_embedding"] = {
+                "shape_match": True,
+                "cosine_similarity": cosine,
+                "max_abs_diff": float(np.max(np.abs(emb_a - emb_b))),
+                "mean_abs_diff": float(np.mean(np.abs(emb_a - emb_b))),
+            }
+
     text = json.dumps(report, indent=2)
     if args.output:
         args.output.write_text(text)
