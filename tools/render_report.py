@@ -192,7 +192,9 @@ def build_markdown(
             f"# PRIMA MRI Brain — {study_id}",
             "",
             "> **Lưu ý:** Đây là đầu ra hỗ trợ nghiên cứu của PRIMA, không phải chẩn đoán xác định. "
-            "Các giá trị là **margin so với ngưỡng mô hình**, không phải phần trăm xác suất bệnh.",
+            "Diagnosis/referral là **margin so với ngưỡng mô hình**; priority dùng score tương đối để lấy argmax. "
+            "Các score này không phải phần trăm xác suất bệnh. Các diagnosis là những task nhị phân độc lập, "
+            "vì vậy có thể có nhiều nhãn cùng vượt ngưỡng.",
             "",
             "## Mức ưu tiên",
             "",
@@ -284,8 +286,9 @@ def build_markdown(
     lines = [
         f"# PRIMA MRI Brain — {study_id}",
         "",
-        "> **Note:** Research decision-support output only. Scores are model margins "
-        "relative to task thresholds, not calibrated disease probabilities.",
+        "> **Note:** Research decision-support output only. Diagnosis/referral values are "
+        "threshold margins; priority uses relative class scores and argmax. None are calibrated "
+        "disease probabilities, and diagnosis tasks are independent.",
         "",
         "## Priority",
         "",
