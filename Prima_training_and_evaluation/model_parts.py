@@ -1,11 +1,18 @@
+import os
 import torch
 import math
+import torch.nn.functional as F
 from typing import Dict, List, Tuple, Optional, Union, Callable
 from torch import nn
 from perceiver_pytorch import Perceiver
 from einops import rearrange, repeat
 from positional_encodings.torch_encodings import PositionalEncoding1D
 from einops.layers.torch import Rearrange
+try:
+    from torch.nn.attention.varlen import varlen_attn as torch_varlen_attn
+except (ImportError, AttributeError):
+    torch_varlen_attn = None
+
 try:
     from flash_attn import flash_attn_qkvpacked_func, flash_attn_varlen_qkvpacked_func
 except ImportError:
@@ -71,7 +78,11 @@ class FeedForward(nn.Module):
 
 
 class Attention(nn.Module):
-    """Multi-head attention with optional flash attention support."""
+    """Multi-head attention with capability-based backend selection.
+
+    Auto order: PyTorch native varlen, external flash-attn, then SDPA.
+    Override with PRIMA_ATTENTION_BACKEND=auto|native|flash|sdpa.
+    """
 
     def __init__(self,
                  dim: int,
@@ -87,61 +98,118 @@ class Attention(nn.Module):
         self.heads = heads
         self.dim_head = dim_head
         self.scale = dim_head**-0.5
-
         self.attend = nn.Softmax(dim=-1)
         self.dropout = nn.Dropout(dropout)
         self.dropoutp = dropout
         self.causal = causal
-
         self.to_qkv = nn.Linear(dim, inner_dim * 3, bias=False)
-
         self.to_out = nn.Sequential(
             nn.Linear(inner_dim, dim),
             nn.Dropout(dropout)) if project_out else nn.Identity()
+
+    def _backend(self) -> str:
+        if hasattr(self, 'noflashattn') and self.noflashattn:
+            return 'sdpa'
+        requested = os.environ.get('PRIMA_ATTENTION_BACKEND', 'auto').lower()
+        if requested not in {'auto', 'native', 'flash', 'sdpa'}:
+            raise ValueError(
+                'PRIMA_ATTENTION_BACKEND must be auto, native, flash, or sdpa'
+            )
+        if requested != 'auto':
+            return requested
+        if torch_varlen_attn is not None:
+            return 'native'
+        if flash_attn_varlen_qkvpacked_func is not None:
+            return 'flash'
+        return 'sdpa'
 
     def forward(self, x: torch.Tensor, culen: torch.Tensor,
                 mxlen: torch.Tensor) -> torch.Tensor:
         if not hasattr(self, 'causal'):
             self.causal = False
-        bxs, embsize = x.size()
+
+        bxs, _ = x.size()
         qkv = self.to_qkv(x).view(bxs, 3, self.heads, self.dim_head)
-        if (hasattr(self, 'noflashattn') and self.noflashattn) or flash_attn_varlen_qkvpacked_func is None:
-            out = no_flash_attn_varlen_substitute(qkv, culen.type(torch.int32))
-        else:
-            out = flash_attn_varlen_qkvpacked_func(
-                qkv,
-                culen.type(torch.int32),
-                mxlen,
-                dropout_p=self.dropoutp,
-                causal=self.causal)  # flash attention!
+        cu = culen.to(device=x.device, dtype=torch.int32)
+        max_len = int(mxlen.item()) if isinstance(mxlen, torch.Tensor) else int(mxlen)
+        dropout_p = self.dropoutp if self.training else 0.0
+        backend = self._backend()
+
+        if backend == 'native':
+            if torch_varlen_attn is None:
+                if os.environ.get('PRIMA_ATTENTION_BACKEND', 'auto').lower() == 'native':
+                    raise RuntimeError('Native PyTorch varlen attention is unavailable')
+                backend = 'flash' if flash_attn_varlen_qkvpacked_func is not None else 'sdpa'
+            else:
+                q, k, v = qkv.unbind(dim=1)
+                try:
+                    out = torch_varlen_attn(
+                        query=q,
+                        key=k,
+                        value=v,
+                        cu_seq_q=cu,
+                        cu_seq_k=cu,
+                        max_q=max_len,
+                        max_k=max_len,
+                        scale=self.scale,
+                        window_size=(-1, 0) if self.causal else (-1, -1),
+                    )
+                except (RuntimeError, NotImplementedError):
+                    if os.environ.get('PRIMA_ATTENTION_BACKEND', 'auto').lower() == 'native':
+                        raise
+                    backend = 'flash' if flash_attn_varlen_qkvpacked_func is not None else 'sdpa'
+
+        if backend == 'flash':
+            if flash_attn_varlen_qkvpacked_func is None:
+                if os.environ.get('PRIMA_ATTENTION_BACKEND', 'auto').lower() == 'flash':
+                    raise RuntimeError('flash-attn backend requested but package is unavailable')
+                backend = 'sdpa'
+            else:
+                out = flash_attn_varlen_qkvpacked_func(
+                    qkv,
+                    cu,
+                    max_len,
+                    dropout_p=dropout_p,
+                    causal=self.causal,
+                )
+
+        if backend == 'sdpa':
+            out = sdpa_varlen(qkv, cu, dropout_p=dropout_p, causal=self.causal)
+
         out = out.flatten(start_dim=1)
-        assert len(out.size()) == 2
-        assert out.size()[-1] == self.inner_dim
+        assert out.ndim == 2
+        assert out.size(-1) == self.inner_dim
         return self.to_out(out)
 
 
-# attention function without using flash attention
+def sdpa_varlen(
+    qkv: torch.Tensor,
+    culen: torch.Tensor,
+    dropout_p: float = 0.0,
+    causal: bool = False,
+) -> torch.Tensor:
+    """Variable-length attention through PyTorch SDPA without batch padding."""
+    q, k, v = qkv.unbind(dim=1)
+    out = torch.empty_like(q)
+    boundaries = culen.detach().to(device='cpu', dtype=torch.int64).tolist()
+
+    for start, stop in zip(boundaries[:-1], boundaries[1:]):
+        if stop <= start:
+            continue
+        qs = q[start:stop].transpose(0, 1).unsqueeze(0)
+        ks = k[start:stop].transpose(0, 1).unsqueeze(0)
+        vs = v[start:stop].transpose(0, 1).unsqueeze(0)
+        ys = F.scaled_dot_product_attention(
+            qs, ks, vs, dropout_p=dropout_p, is_causal=causal
+        )
+        out[start:stop] = ys.squeeze(0).transpose(0, 1)
+    return out
+
+
 def no_flash_attn_varlen_substitute(qkv: torch.Tensor,
                                     culen: torch.Tensor) -> torch.Tensor:
-    """Fallback attention implementation when flash attention is not available."""
-    qkv = qkv.transpose(0, 1)
-    q, k, v = map(lambda t: rearrange(t, 'n h d -> h n d'), qkv)
-
-    n = qkv.size()[1]
-    h = qkv.size()[2]
-    d = qkv.size()[-1]
-    out = torch.zeros(h, n, d).to(qkv.device)
-    for i in range(len(culen) - 1):
-        dots = torch.matmul(
-            q[:, culen[i]:culen[i + 1]], k[:, culen[i]:culen[i + 1]].transpose(
-                -1, -2)) * (d**-0.5)
-        attn = torch.nn.functional.softmax(dots, dim=-1)
-        #print(attn)
-        out[:,
-            culen[i]:culen[i + 1]] = torch.matmul(attn,
-                                                  v[:, culen[i]:culen[i + 1]])
-    out = rearrange(out, 'h n d -> n (h d)')
-    return out
+    """Backward-compatible alias for the historical non-flash fallback."""
+    return sdpa_varlen(qkv, culen, dropout_p=0.0, causal=False)
 
 
 class Transformer(nn.Module):
