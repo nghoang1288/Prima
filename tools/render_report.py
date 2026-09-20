@@ -6,6 +6,7 @@ from __future__ import annotations
 import argparse
 import html
 import json
+import math
 import re
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple
@@ -26,12 +27,18 @@ LABELS_VI = {
 
 def scalar(value: Any) -> float:
     if isinstance(value, (int, float)):
-        return float(value)
+        number = float(value)
+        if not math.isfinite(number):
+            raise ValueError("Prediction score must be finite")
+        return number
     flat = value
     while isinstance(flat, list) and len(flat) == 1:
         flat = flat[0]
     if isinstance(flat, (int, float)):
-        return float(flat)
+        number = float(flat)
+        if not math.isfinite(number):
+            raise ValueError("Prediction score must be finite")
+        return number
     raise ValueError(f"Expected scalar-like prediction, got {type(value).__name__}")
 
 
@@ -137,7 +144,7 @@ def build_markdown(
         else:
             lines.append("_Không có đầu ra priority._")
 
-        lines += ["", "## Diagnosis — đầu ra vượt ngưỡng", ""]
+        lines += ["", "## Chẩn đoán — đầu ra vượt ngưỡng", ""]
         if d_pos:
             for name, score in d_pos:
                 lines.append(
@@ -147,7 +154,7 @@ def build_markdown(
         else:
             lines.append("_Không có diagnosis output nào vượt ngưỡng 0._")
 
-        lines += ["", f"## Diagnosis — gần ngưỡng âm (0 đến -{near_margin:g})", ""]
+        lines += ["", f"## Chẩn đoán — gần ngưỡng âm (0 đến -{near_margin:g})", ""]
         if d_near:
             for name, score in d_near:
                 lines.append(
@@ -157,7 +164,7 @@ def build_markdown(
         else:
             lines.append("_Không có._")
 
-        lines += ["", "## Referral — đầu ra vượt ngưỡng", ""]
+        lines += ["", "## Gợi ý chuyển chuyên khoa — vượt ngưỡng", ""]
         if r_pos:
             for name, score in r_pos:
                 lines.append(
@@ -168,7 +175,7 @@ def build_markdown(
             lines.append("_Không có referral output nào vượt ngưỡng 0._")
 
         if r_near:
-            lines += ["", f"### Referral gần ngưỡng âm (0 đến -{near_margin:g})", ""]
+            lines += ["", f"### Chuyển chuyên khoa gần ngưỡng âm (0 đến -{near_margin:g})", ""]
             for name, score in r_near:
                 lines.append(
                     f"- {label_for(name, language)} — margin `{fmt_margin(score)}`  "
@@ -201,7 +208,7 @@ def build_markdown(
             if tech.get("tokenizer_chunk_limit") is not None:
                 lines.append(f"- Tokenizer chunk limit: {tech['tokenizer_chunk_limit']}")
         else:
-            lines.append("_Không co runtime metrics._")
+            lines.append("_Không có runtime metrics._")
 
         lines += [
             "",
@@ -224,7 +231,7 @@ def build_markdown(
     if p_decision:
         p_name, p_score = p_decision
         lines.append(
-            f"** {PRIORITY_EN.get(normalize_code(p_name), label_for(p_name, language))}** "
+            f"**{PRIORITY_EN.get(normalize_code(p_name), label_for(p_name, language))}** "
             f"(score {fmt_margin(p_score)})"
         )
     else:
