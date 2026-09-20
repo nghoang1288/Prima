@@ -42,3 +42,9 @@ def test_vectorized_patchification_matches_legacy_order_and_values():
     assert torch.allclose(torch.tensor(new_values), torch.tensor(old_values))
     for new, old in zip(new_patches, old_patches):
         assert torch.allclose(new, old)
+
+
+def test_exact_256_cube_defaults_to_sitk_array_z_axis():
+    patch_shape, z_idx = adjusted_patch_shape((256, 256, 256))
+    assert z_idx == 0
+    assert patch_shape == [4, 32, 32]
