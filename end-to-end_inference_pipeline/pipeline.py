@@ -68,6 +68,7 @@ class PipelineConfig:
     tokenizer_encoder_only: bool = True
     tokenizer_dtype: str = "float16"
     stream_dicom: bool = False
+    fail_on_series_error: bool = False
     low_vram: bool = False
     visual_dtype: str = "float16"
     quantize_cpu_heads: bool = False
@@ -156,6 +157,7 @@ class Pipeline:
             "config": safe_config,
             "stages": {},
             "series": [],
+            "skipped_series": [],
             "cuda_available": torch.cuda.is_available(),
         }
         if torch.cuda.is_available():
@@ -283,7 +285,10 @@ class Pipeline:
 
     def load_mri_study(self) -> Tuple[List[sitk.Image], List[str]]:
         self.logger.info("Loading MRI study into RAM")
-        mri_study, series_list = DicomUtils.load_mri_study(self.config.study_dir)
+        mri_study, series_list = DicomUtils.load_mri_study(
+            self.config.study_dir,
+            fail_on_error=self.config.fail_on_series_error,
+        )
         self.logger.info("Loaded %d series", len(mri_study))
         return mri_study, series_list
 
@@ -543,7 +548,17 @@ class Pipeline:
                 name = series_names[idx] if series_names is not None else f"series_{idx}"
                 try:
                     emb, meta = self._tokenize_series(image, name, vqvae)
+                except torch.OutOfMemoryError:
+                    raise
                 except Exception as exc:
+                    if self.config.fail_on_series_error:
+                        raise RuntimeError(
+                            f"Series processing failed at index={idx}; "
+                            "fail_on_series_error=true"
+                        ) from exc
+                    self.metrics["skipped_series"].append(
+                        {"index": idx, "name": name, "reason": str(exc)}
+                    )
                     self.logger.warning(
                         "Skipping series index=%s name=%s: %s",
                         idx,
@@ -578,11 +593,24 @@ class Pipeline:
 
         try:
             for idx, (image, name, _source) in enumerate(
-                DicomUtils.iter_mri_study(self.config.study_dir)
+                DicomUtils.iter_mri_study(
+                    self.config.study_dir,
+                    fail_on_error=self.config.fail_on_series_error,
+                )
             ):
                 try:
                     emb, meta = self._tokenize_series(image, name, vqvae)
+                except torch.OutOfMemoryError:
+                    raise
                 except Exception as exc:
+                    if self.config.fail_on_series_error:
+                        raise RuntimeError(
+                            f"Streamed series processing failed at index={idx}; "
+                            "fail_on_series_error=true"
+                        ) from exc
+                    self.metrics["skipped_series"].append(
+                        {"index": idx, "name": name, "reason": str(exc)}
+                    )
                     self.logger.warning(
                         "Skipping streamed series index=%s name=%s: %s",
                         idx,
