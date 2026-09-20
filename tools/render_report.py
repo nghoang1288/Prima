@@ -11,6 +11,15 @@ import re
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple
 
+try:
+    from tools.evidence import build_evidence_html, generate_study_evidence
+except ImportError:
+    try:
+        from evidence import build_evidence_html, generate_study_evidence
+    except ImportError:
+        build_evidence_html = None
+        generate_study_evidence = None
+
 PRIORITY_VI = {"high": "Ưu tiên cao", "low": "Ưu tiên thấp", "none": "Không ưu tiên"}
 PRIORITY_EN = {"high": "High priority", "low": "Low priority", "none": "No priority"}
 
@@ -417,9 +426,10 @@ def build_markdown(
     return "\n".join(lines) + "\n"
 
 
-def markdown_to_html(markdown_text: str, *, study_id: str) -> str:
+def markdown_to_html(markdown_text: str, *, study_id: str, evidence_html: str = "") -> str:
     body: List[str] = []
     in_list = False
+    evidence_inserted = False
 
     def close_list() -> None:
         nonlocal in_list
@@ -432,7 +442,13 @@ def markdown_to_html(markdown_text: str, *, study_id: str) -> str:
         if not line:
             close_list()
             continue
-        if line == "---":
+        if line.startswith("## Thông tin kỹ thuật") or line.startswith("## Technical information"):
+            close_list()
+            if evidence_html and not evidence_inserted:
+                body.append(evidence_html)
+                evidence_inserted = True
+            body.append(f"<h2>{html.escape(line[3:])}</h2>")
+        elif line == "---":
             close_list()
             body.append("<hr>")
         elif line.startswith("# "):
@@ -467,6 +483,9 @@ def markdown_to_html(markdown_text: str, *, study_id: str) -> str:
                 body.append(f"<p>{text}</p>")
     close_list()
 
+    if evidence_html and not evidence_inserted:
+        body.append(evidence_html)
+
     return f"""<!doctype html>
 <html lang="vi">
 <head>
@@ -483,12 +502,25 @@ h2 {{ margin-top:30px; border-bottom:1px solid #e7e7e7; padding-bottom:8px; }}
 li {{ margin:8px 0; }}
 code {{ font-family:ui-monospace,SFMono-Regular,Consolas,monospace; background:#f0f1f2; padding:2px 6px; border-radius:5px; }}
 small {{ opacity:.7; }}
+.evidence-panel {{ margin-top:28px; }}
+.evidence-disclaimer {{ margin-bottom:16px; font-size:14px; }}
+.evidence-item {{ margin-bottom:24px; padding-bottom:16px; border-bottom:1px dashed #e0e0e0; }}
+.evidence-item:last-child {{ border-bottom:none; }}
+.evidence-meta {{ font-size:14px; color:#555; margin:4px 0 10px 0; }}
+.evidence-grid {{ display:flex; flex-wrap:wrap; gap:12px; margin:8px 0; }}
+.evidence-card {{ display:flex; flex-direction:column; align-items:center; background:#f8f9fa; padding:6px; border-radius:8px; border:1px solid #e2e4e8; }}
+.evidence-card img {{ width:140px; height:140px; object-fit:cover; border-radius:4px; display:block; }}
+.evidence-card span {{ font-size:11px; margin-top:5px; color:#555; font-weight:500; }}
 @media (prefers-color-scheme: dark) {{
   body {{ background:#15171a; color:#e8eaed; }}
   main {{ background:#202124; box-shadow:none; }}
   h2 {{ border-color:#3c4043; }}
   .notice {{ background:#2b2d31; }}
   code {{ background:#303134; }}
+  .evidence-item {{ border-color:#3c4043; }}
+  .evidence-meta {{ color:#aaa; }}
+  .evidence-card {{ background:#2a2b2e; border-color:#3c4043; }}
+  .evidence-card span {{ color:#aaa; }}
 }}
 @media print {{
   body {{ background:white; }}
@@ -504,12 +536,57 @@ def render_reports(
     *,
     study_id: str,
     output_dir: Path,
+    study_dir: Optional[Path] = None,
     metrics: Optional[Dict[str, Any]] = None,
     language: str = "vi",
     near_margin: float = 0.25,
     show_all_scores: bool = False,
 ) -> Tuple[Path, Path]:
     output_dir.mkdir(parents=True, exist_ok=True)
+
+    if study_dir is None:
+        candidate = (metrics or {}).get("config", {}).get("study_dir")
+        if candidate and candidate != "<redacted>" and Path(candidate).exists():
+            study_dir = Path(candidate)
+
+    if study_dir is None:
+        local_cfg = Path.home() / ".config" / "prima-antigravity" / "local.json"
+        if local_cfg.exists():
+            try:
+                with open(local_cfg, "r", encoding="utf-8") as f:
+                    cfg = json.load(f)
+                r_root = cfg.get("PRIMA_RUNTIME_ROOT") or cfg.get("runtime_root")
+                if r_root:
+                    staged_path = Path(r_root) / "cases" / study_id
+                    if staged_path.exists():
+                        study_dir = staged_path
+            except Exception:
+                pass
+
+    if study_dir is None:
+        for cand in [Path("cases") / study_id, output_dir.parent / "cases" / study_id]:
+            if cand.exists():
+                study_dir = cand
+                break
+
+    evidence_html = ""
+    if study_dir and generate_study_evidence:
+        d_pos, _, _ = classify_threshold_group(predictions.get("diagnosis", {}), near_margin)
+        positive_codes = [name for name, _ in d_pos]
+        if positive_codes:
+            try:
+                evidence_entries = generate_study_evidence(
+                    study_dir=study_dir,
+                    output_dir=output_dir,
+                    positive_diagnoses=positive_codes,
+                    label_resolver=label_for,
+                    language=language,
+                )
+                if build_evidence_html:
+                    evidence_html = build_evidence_html(evidence_entries, language=language)
+            except Exception:
+                evidence_html = ""
+
     markdown = build_markdown(
         predictions,
         study_id=study_id,
@@ -521,7 +598,7 @@ def render_reports(
     md_path = output_dir / f"{study_id}_report.md"
     html_path = output_dir / f"{study_id}_report.html"
     md_path.write_text(markdown, encoding="utf-8")
-    html_path.write_text(markdown_to_html(markdown, study_id=study_id), encoding="utf-8")
+    html_path.write_text(markdown_to_html(markdown, study_id=study_id, evidence_html=evidence_html), encoding="utf-8")
     return md_path, html_path
 
 
@@ -530,6 +607,7 @@ def main() -> None:
     parser.add_argument("predictions", type=Path)
     parser.add_argument("--metrics", type=Path)
     parser.add_argument("--study-id")
+    parser.add_argument("--study-dir", type=Path)
     parser.add_argument("--output-dir", type=Path)
     parser.add_argument("--language", choices=["vi", "en"], default="vi")
     parser.add_argument("--near-margin", type=float, default=0.25)
@@ -549,6 +627,7 @@ def main() -> None:
         predictions,
         study_id=study_id,
         output_dir=output_dir,
+        study_dir=args.study_dir,
         metrics=metrics,
         language=args.language,
         near_margin=args.near_margin,
