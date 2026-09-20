@@ -1,0 +1,76 @@
+{
+  "schema_version": 1,
+  "task_id": "PRIMA-20260920-002",
+  "agent_id": "antigravity-windows-01",
+  "status": "success",
+  "started_at": "2026-09-20T23:51:00+07:00",
+  "finished_at": "2026-09-20T23:54:00+07:00",
+  "code": {
+    "branch": "modern-runtime",
+    "sha": "95ea4800b085922991f79941f668fb876eb956ca"
+  },
+  "checks": [
+    {
+      "name": "verify_modern_runtime_sha",
+      "status": "pass",
+      "detail": "origin/modern-runtime verified at 95ea4800b085922991f79941f668fb876eb956ca"
+    },
+    {
+      "name": "report_rendering_tests",
+      "status": "pass",
+      "detail": "tests/test_render_report.py passed (7 passed in 4.39s on exact SHA worktree)"
+    },
+    {
+      "name": "case001_fast_profile_execution",
+      "status": "pass",
+      "detail": "Executed pipeline with configs/rtx4060_8gb_fast.yaml semantics on CASE001 (13/13 series processed, 0 failed/skipped)"
+    },
+    {
+      "name": "local_artifacts_verification",
+      "status": "pass",
+      "detail": "Verified local existence of CASE001_predictions.json, CASE001_report.md, CASE001_report.html, and runtime_metrics.json"
+    },
+    {
+      "name": "html_report_vietnamese_validation",
+      "status": "pass",
+      "detail": "Validated CASE001_report.html is valid UTF-8 and contains CASE001 with human-readable Vietnamese sections"
+    },
+    {
+      "name": "patient_safety_isolation",
+      "status": "pass",
+      "detail": "No PHI, patient identifiers, local patient paths, or per-diagnosis prediction logits were written to GitHub"
+    }
+  ],
+  "artifacts": {
+    "code_branch": null,
+    "commit_sha": null,
+    "pull_request": null
+  },
+  "metrics": {
+    "series_count": 13,
+    "failed_series_count": 0,
+    "skipped_series_count": 0,
+    "timing_seconds": {
+      "tokenizer_load": 0.26,
+      "tokenizer_total": 12.20,
+      "prima_load": 0.39,
+      "prima_inference": 24.22,
+      "total": 37.03
+    },
+    "memory": {
+      "peak_cpu_rss_gib": 22.12,
+      "peak_cuda_allocated_gib": 0.44,
+      "peak_cuda_reserved_gib": 0.81,
+      "cuda_free_vram_gib": 6.73,
+      "cuda_total_vram_gib": 8.00
+    },
+    "comparison_vs_baseline": {
+      "baseline_total_seconds": 43.40,
+      "fast_total_seconds": 37.03,
+      "speedup_seconds": 6.37,
+      "speedup_percent": 14.7
+    }
+  },
+  "blockers": [],
+  "next_recommendation": "Task PRIMA-20260920-002 complete. Fast profile validated successfully on CASE001 with 0 series dropped and full Vietnamese reports rendered."
+}
