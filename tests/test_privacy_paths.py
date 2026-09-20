@@ -44,3 +44,15 @@ def test_explicit_case_id_is_used_and_source_path_redacted(tmp_path):
     assert pipeline.study_id == "CASE001"
     assert safe["study_dir"] == "<redacted>"
     assert "NGUYEN THI HOA" not in str(safe)
+
+
+def test_series_display_names_are_redacted_by_default(tmp_path):
+    pipeline = MODULE.Pipeline.__new__(MODULE.Pipeline)
+    pipeline.config = make_config(tmp_path)
+
+    label = pipeline._series_display_name(
+        0,
+        "UNK-1.2.840.113619.2.55.3.123456789",
+    )
+    assert label == "series_0000"
+    assert "1.2.840" not in label
