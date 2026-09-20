@@ -35,5 +35,6 @@ compile_visual: false
 compile_mode: "default"
 
 otsu_percentage: 5
+prefilter_otsu_before_vq: false
 log_cuda_memory: true
 save_runtime_metrics: true
