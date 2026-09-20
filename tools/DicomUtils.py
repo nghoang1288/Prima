@@ -252,7 +252,10 @@ class DicomUtils:
             raise RuntimeError(f"Failed to read DICOM series: {str(e)}")
 
     @staticmethod
-    def iter_mri_study(study_dir: str) -> Iterator[Tuple[sitk.Image, str, str]]:
+    def iter_mri_study(
+        study_dir: str,
+        fail_on_error: bool = False,
+    ) -> Iterator[Tuple[sitk.Image, str, str]]:
         """Yield one processed DICOM series at a time.
 
         Returns tuples of (image, series_name, source_directory). Invalid series
@@ -279,19 +282,33 @@ class DicomUtils:
                 yielded += 1
                 yield series_image, series_name, series_path
             except Exception as e:
-                logging.warning(f"Failed to load series {series}: {str(e)}. Skipping...")
+                if fail_on_error:
+                    raise RuntimeError(
+                        f"Failed to load configured series directory: {series}"
+                    ) from e
+                logging.warning(
+                    "Failed to load series %s: %s. Skipping...",
+                    series,
+                    str(e),
+                )
                 continue
         if yielded == 0:
             raise RuntimeError("No valid series found in configured study directory")
 
     @staticmethod
-    def load_mri_study(study_dir: str) -> Tuple[List[sitk.Image], List[str]]:
+    def load_mri_study(
+        study_dir: str,
+        fail_on_error: bool = False,
+    ) -> Tuple[List[sitk.Image], List[str]]:
         """Load all series into memory (legacy compatibility path)."""
         try:
             logging.info('Loading MRI studies')
             mri_study = []
             valid_series_list = []
-            for image, series_name, _ in DicomUtils.iter_mri_study(study_dir):
+            for image, series_name, _ in DicomUtils.iter_mri_study(
+                study_dir,
+                fail_on_error=fail_on_error,
+            ):
                 mri_study.append(image)
                 valid_series_list.append(series_name)
             return mri_study, valid_series_list
