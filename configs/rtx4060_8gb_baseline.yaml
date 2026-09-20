@@ -27,6 +27,7 @@ attention_backend: "auto"
 
 # Golden output: no head quantization, no compiler transforms.
 quantize_cpu_heads: false
+head_quant_backend: "torch_dynamic"
 compile_visual: false
 compile_mode: "default"
 
