@@ -326,32 +326,29 @@ class ViT(nn.Module):
             x += self.pos_embedding[:, :(n + 1)]
         x = self.dropout(x)
 
-        # this following part converts the batch of sequences into one long cumulated sequence for flashattn varlen
-        mxlen = n + self.clsnum  # max length in batch
-        cl = torch.cumsum(lens + self.clsnum,
-                          dim=0)  # cumulative sums of lengths
-        culen = torch.zeros(len(cl) + 1).long().to(cl.device)
-        culen[
-            1:] = cl  # cumulative sequence length used for flash attention input
-        nx = torch.zeros(culen[-1].item(), embsize).to(x.device)
-        for i in range(
-                len(cl)
-        ):  # move each input sequence into the concatenated long sequence
-            assert lens[i] + self.clsnum == culen[i + 1] - culen[i]
-            nx[culen[i]:culen[i + 1]] = x[i][0:lens[i] + self.clsnum]
-        x = nx
+        # Pack variable-length sequences without Python-side tensor copies.
+        # Row-major boolean indexing preserves the historical batch/token order.
+        lengths = (lens + self.clsnum).to(device=x.device, dtype=torch.long)
+        cl = torch.cumsum(lengths, dim=0)
+        culen = torch.cat((cl.new_zeros(1), cl), dim=0)
+        mxlen = lengths.max()
+        token_positions = torch.arange(x.size(1), device=x.device).unsqueeze(0)
+        valid = token_positions < lengths.unsqueeze(1)
+        x = x[valid]
 
         zerocheck = torch.logical_and(
             (x.max(dim=1).values == 0),
-            (x.min(dim=1).values
-             == 0))  # check that we don't have empty embeddings used
+            (x.min(dim=1).values == 0)
+        )
         assert zerocheck.int().sum() == 0
         xx = self.transformer(x, culen, mxlen)
-        # separate the flash attention cumulated output back to separate sequences
-        xxoutdim = xx.size()[-1]
-        x = torch.zeros(b, self.clsnum, xxoutdim).to(x.device)
-        for i in range(b):
-            x[i] = xx[culen[i]:culen[i] + self.clsnum]
+
+        # Gather classification tokens from each packed sequence in one op.
+        starts = culen[:-1].to(dtype=torch.long)
+        cls_offsets = starts.unsqueeze(1) + torch.arange(
+            self.clsnum, device=xx.device, dtype=torch.long
+        ).unsqueeze(0)
+        x = xx[cls_offsets]
 
         x = x.mean(dim=1) if self.pool == 'mean' else x[:, 0:self.clsnum]
 
@@ -410,23 +407,20 @@ class SerieTransformerEncoder(nn.Module):
             end=len(x)).to(occur46.device))
         lens = occur46[:, 1] + 1
         x = self.embed(x)
-        posenc = self.p_enc[0:x.size()[1]].to(x.device).repeat(len(x), 1, 1)
+        posenc = self.p_enc[0:x.size()[1]].to(
+            device=x.device, dtype=x.dtype
+        ).unsqueeze(0).expand(len(x), -1, -1)
         x = torch.cat([x, posenc], dim=2)
-        cl = torch.cumsum(lens, dim=0)  # cumulative sums of lengths
-        culen = torch.zeros(len(cl) + 1).long().to(cl.device)
-        culen[
-            1:] = cl  # cumulative sequence length used for flash attention input
-        mxlen = lens.max()
-        nx = torch.zeros(culen[-1].item(), self.embsize).to(x.device)
-        for i in range(
-                len(cl)
-        ):  # move each input sequence into the concatenated long sequence
-            assert lens[i] == culen[i + 1] - culen[i]
-            nx[culen[i]:culen[i + 1]] = x[i][0:lens[i]]
+
+        lengths = lens.to(device=x.device, dtype=torch.long)
+        cl = torch.cumsum(lengths, dim=0)
+        culen = torch.cat((cl.new_zeros(1), cl), dim=0)
+        mxlen = lengths.max()
+        token_positions = torch.arange(x.size(1), device=x.device).unsqueeze(0)
+        valid = token_positions < lengths.unsqueeze(1)
+        nx = x[valid]
         nx = self.transformer(nx, culen, mxlen)
-        xout = torch.stack([
-            nx[culen[i + 1] - 1] for i in range(len(lens))
-        ])  # obtain the last embedding for each text sequence
+        xout = nx[(culen[1:] - 1).to(dtype=torch.long)]
         if hasattr(self, 'prelinear') and self.prelinear:
             return xout
         return self.linear(xout)
@@ -507,9 +501,9 @@ class HierViT(nn.Module):
             self.innerViT.dim = 289
 
         # batch process serienamevecs
-        serienameencoded = torch.zeros(len(lens), len(lenss),
-                                       self.innerViT.dim).to(
-                                           self.dummy_param.device)
+        serienameencoded = self.dummy_param.new_zeros(
+            (len(lens), len(lenss), self.innerViT.dim)
+        )
         for j in range(len(lens)):
             serienamevecs = xdict['serienames'][j][0:lens[j]]
             serienameencoded[j][0:lens[j]] = self.serieencoder(serienamevecs)
@@ -517,8 +511,8 @@ class HierViT(nn.Module):
         totalimgs = lens.sum(
         )  # totalimgs is total number of series over the batch
         imgmax = lenss.max()  # longest serie in batch
-        newx = torch.zeros(totalimgs, imgmax + extra, self.innerViT.dim).to(
-            mydevice
+        newx = self.dummy_param.new_zeros(
+            (int(totalimgs.item()), int(imgmax.item()) + extra, self.innerViT.dim)
         )  # the input to the innervit, where each series is treated as a separate sequence
 
         for i in range(len(x)):
@@ -550,12 +544,8 @@ class HierViT(nn.Module):
         extra = 0
         if self.usestudydescription:  # leave extra space for study description
             extra = 1
-        nextx = torch.zeros(
-            len(lens),
-            lens.max() + extra,
-            outs.size()[-1]
-        ).to(
-            mydevice
+        nextx = outs.new_zeros(
+            (len(lens), int(lens.max().item()) + extra, outs.size(-1))
         )  # the input to outervit, with size batch_size x max_num_series_per_study x emb_size
         if self.usestudydescription:
             nextx[:,
@@ -564,7 +554,7 @@ class HierViT(nn.Module):
         for pos, out in enumerate(outs):
             i, j = mapper[pos]
             nextx[j][i + extra] = out
-        lens += extra
+        outer_lens = lens + extra
         if self.patdis:
             m = []
             for pos in mapper:
@@ -574,7 +564,7 @@ class HierViT(nn.Module):
             m = torch.LongTensor(m).to(innerraw.device)
             return self.outerViT({
                 'visual': nextx,
-                'lens': lens.to(mydevice)
+                'lens': outer_lens.to(mydevice)
             },
                                  retpool=retpool), self.patdisnet(innerraw), m
         if hasattr(self, 'getserieemb') and self.getserieemb:
