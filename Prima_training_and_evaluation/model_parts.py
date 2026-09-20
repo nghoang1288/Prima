@@ -158,7 +158,7 @@ class Attention(nn.Module):
                         scale=self.scale,
                         window_size=(-1, 0) if self.causal else (-1, -1),
                     )
-                except (RuntimeError, NotImplementedError):
+                except (RuntimeError, NotImplementedError, ValueError):
                     if os.environ.get('PRIMA_ATTENTION_BACKEND', 'auto').lower() == 'native':
                         raise
                     backend = 'flash' if flash_attn_varlen_qkvpacked_func is not None else 'sdpa'
