@@ -36,6 +36,15 @@ pip install --upgrade pip
 pip install -r requirements-runtime.txt
 ```
 
+For the preferred TorchAO INT8 backend, optionally install:
+
+```bash
+pip install -r requirements-quant.txt
+```
+
+If TorchAO is absent or incompatible, the optimized profile automatically falls
+back to PyTorch dynamic INT8 rather than failing.
+
 If PyTorch needs a CUDA-specific wheel on your platform, install the matching
 PyTorch 2.14 build from the official PyTorch selector first, then install the
 remaining requirements.
