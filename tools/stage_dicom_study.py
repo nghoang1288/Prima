@@ -138,13 +138,23 @@ def main() -> None:
     if not source.is_dir():
         raise FileNotFoundError("Source study directory does not exist")
 
+    if source == destination:
+        raise ValueError("Source and destination must be different directories")
+    if source in destination.parents or destination in source.parents:
+        raise ValueError(
+            "Source and destination must not be nested inside each other"
+        )
+    if destination == Path("/") or destination == Path.home().resolve():
+        raise ValueError("Refusing unsafe staging destination")
+
     if destination.exists():
         if not args.overwrite:
             raise FileExistsError(
                 "Destination already exists; use --overwrite for a fresh local staging copy"
             )
         shutil.rmtree(destination)
-    destination.mkdir(parents=True)
+    destination.mkdir(parents=True, mode=0o700)
+    destination.chmod(0o700)
 
     (
         groups,
@@ -168,11 +178,12 @@ def main() -> None:
         start=1,
     ):
         series_dir = destination / f"series_{series_index:04d}_{uid_hash(series_uid)}"
-        series_dir.mkdir()
+        series_dir.mkdir(mode=0o700)
         for image_index, src in enumerate(sorted(files), start=1):
             suffix = src.suffix if src.suffix else ".dcm"
             dst = series_dir / f"image_{image_index:06d}{suffix}"
             shutil.copy2(src, dst)
+            dst.chmod(0o600)
 
         series_rows.append(
             {
