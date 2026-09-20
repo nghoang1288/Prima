@@ -1,7 +1,7 @@
 import json
 from pathlib import Path
 
-from tools.render_report import LABELS_VI, build_markdown, markdown_to_html
+from tools.render_report import (DIAGNOSIS_LABELS_VI, REFERRAL_LABELS_VI, build_markdown, markdown_to_html)
 
 
 def sample_predictions():
@@ -91,4 +91,14 @@ def test_vietnamese_map_covers_all_52_published_diagnoses():
         ).read_text()
     )
     assert len(config) == 52
-    assert set(LABELS_VI) == set(config)
+    assert set(DIAGNOSIS_LABELS_VI) == set(config)
+
+
+def test_vietnamese_map_covers_all_15_checkpoint_referrals():
+    expected = {
+        "ns-pediatric", "ns-skull base", "ns-general", "ns-trauma",
+        "ns-tumor", "ns-vascular", "nl-pediatric", "nl-epilepsy",
+        "nl-neurocritical", "nl-neuroimmunology", "nl-neurocognitive",
+        "nl-oncology", "nl-trauma", "nl-stroke", "nl-general",
+    }
+    assert set(REFERRAL_LABELS_VI) == expected
