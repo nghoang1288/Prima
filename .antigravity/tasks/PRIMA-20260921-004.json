@@ -1,0 +1,65 @@
+{
+  "schema_version": 1,
+  "task_id": "PRIMA-20260921-004",
+  "created_at": "2026-09-21T00:12:00+07:00",
+  "target_agent": "antigravity",
+  "status": "pending",
+  "supersedes": null,
+  "code": {
+    "branch": "modern-runtime",
+    "base_sha": "99cd62ccfadccb6c6e52a9f09977eb9f1f3391cf"
+  },
+  "execution": {
+    "mode": "code_change",
+    "requires_user_approval": false,
+    "local_aliases_only": true,
+    "instructions": [
+      "Read ANTIGRAVITY_BRIDGE.md from origin/agent-control before execution.",
+      "Fetch origin/modern-runtime and verify exact code.base_sha before starting.",
+      "Create a working branch antigravity/prima-20260921-004 from code.base_sha.",
+      "Implement a first-version radiologist evidence panel for positive PRIMA labels in the human-readable HTML report.",
+      "Do not describe thumbnails as proof, confirmation, true ROI, ground-truth localization, segmentation, or definitive lesion location.",
+      "Use wording such as ảnh gợi ý rà lại, lát cắt tiêu biểu, and hỗ trợ rà soát study.",
+      "Reuse the existing local CASE001 staged study and existing CASE001_predictions.json/runtime_metrics.json from prior tasks. Do not rerun full PRIMA inference unless technically necessary for local validation.",
+      "Add deterministic mapping from diagnosis groups to preferred MRI series keywords. At minimum: ischemic -> DWI/ADC/FLAIR; hemorrhagic -> SWI/T2*/GRE/FLAIR; tumor -> T1 post/T1+C/T1 CE/T2/FLAIR/DWI; structural/ventricular -> T2/FLAIR/T1; infectious/inflammatory -> DWI/FLAIR/T2/T1 post; trauma -> SWI/T2*/FLAIR/DWI.",
+      "Rank locally available series by preferred keyword matches. Series names may be used locally but must not be written to GitHub results if they could contain PHI.",
+      "Implement representative slice selection for chosen series without using patient-derived model localization. Prefer slices within the middle 60 percent of the volume, high non-background brain content, useful intensity variation, and spatially separated selections.",
+      "Generate 3 to 6 local thumbnail PNGs per relevant positive-label evidence panel when suitable series are available.",
+      "Store patient-derived thumbnails only under the local study output directory, for example output/CASE001/evidence/. They must remain git-ignored and must never be pushed to GitHub.",
+      "Extend CASE001_report.html so each positive label can show: diagnosis label, review-aid disclaimer, preferred/selected series, and thumbnail grid.",
+      "Default report must remain radiologist-first: no raw model code or margin in the main evidence section.",
+      "Keep raw CASE001_predictions.json unchanged.",
+      "Add synthetic/non-PHI regression tests for series ranking, representative slice selection, report evidence rendering, HTML escaping, and absence of patient-derived file uploads.",
+      "Run the relevant focused tests.",
+      "Re-render CASE001_report.html locally from the existing prediction JSON and local staged MRI data.",
+      "Verify locally that at least one suitable positive label has evidence thumbnails if suitable series exist.",
+      "Push only source code/tests to the working branch and push only non-PHI aggregate checks in the task result. Do not push thumbnails, DICOM, screenshots, patient report contents, prediction JSON, series names, or per-label logits."
+    ],
+    "commands": [
+      "git fetch origin modern-runtime agent-control",
+      "git rev-parse origin/modern-runtime",
+      "python -m pytest -q tests/test_render_report.py",
+      "python -m pytest -q tests/test_render_evidence.py"
+    ]
+  },
+  "safety": {
+    "allow_patient_data_read_local": true,
+    "allow_patient_derived_output_on_github": false,
+    "allow_destructive_workspace_ops": false,
+    "allow_merge": false,
+    "allow_force_push_code": false
+  },
+  "acceptance": [
+    "origin/modern-runtime equals 99cd62ccfadccb6c6e52a9f09977eb9f1f3391cf",
+    "Working branch antigravity/prima-20260921-004 is created from the exact base SHA",
+    "Synthetic tests cover evidence-series ranking and representative-slice selection",
+    "Human-readable HTML can render an evidence panel under positive PRIMA labels",
+    "Evidence panel explicitly states thumbnails are review aids and not proof/localization ground truth",
+    "CASE001 report is re-rendered locally without rerunning full inference unless necessary",
+    "At least one positive label receives local evidence thumbnails when suitable series exist",
+    "CASE001_predictions.json remains unchanged",
+    "No DICOM, patient-derived thumbnail, screenshot, report content, series name, patient identifier, source path, or per-label patient logits are pushed to GitHub",
+    "A terminal non-PHI result is pushed to .antigravity/results/PRIMA-20260921-004.json"
+  ],
+  "result_path": ".antigravity/results/PRIMA-20260921-004.json"
+}
