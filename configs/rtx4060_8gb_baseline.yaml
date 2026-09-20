@@ -27,7 +27,7 @@ tokenizer_dtype: "float32"
 
 # Conservative tokenizer chunk for 8 GB Ada. Increase after measuring peak VRAM.
 max_tokens_per_chunk: 96
-min_tokens_per_chunk: 16
+min_tokens_per_chunk: 4
 auto_reduce_tokenizer_chunk: true
 
 # Let PyTorch choose native varlen first and SDPA fallback automatically.
