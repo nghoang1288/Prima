@@ -130,6 +130,11 @@ def main() -> None:
         action="store_true",
         help="Replace an existing destination directory.",
     )
+    parser.add_argument(
+        "--quiet",
+        action="store_true",
+        help="Do not print study description or UID hashes to stdout.",
+    )
     args = parser.parse_args()
 
     source = args.source.expanduser().resolve()
@@ -210,7 +215,19 @@ def main() -> None:
         encoding="utf-8",
     )
 
-    print(json.dumps(manifest, indent=2))
+    if args.quiet:
+        print(
+            json.dumps(
+                {
+                    "study_id": args.study_id,
+                    "series_count": len(series_rows),
+                    "skipped_non_mr_instances": skipped_modalities,
+                },
+                indent=2,
+            )
+        )
+    else:
+        print(json.dumps(manifest, indent=2))
 
 
 if __name__ == "__main__":
