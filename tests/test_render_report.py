@@ -35,8 +35,10 @@ def test_vietnamese_report_uses_threshold_semantics_and_priority_argmax():
     assert "Ưu tiên thấp" in markdown
     assert "U thần kinh đệm ở người lớn" in markdown
     assert "Xuất huyết nội sọ" in markdown
-    assert "margin `+0.420`" in markdown
-    assert "không phải phần trăm xác suất bệnh" in markdown
+    assert "Mạch máu — xuất huyết" in markdown
+    assert "Khối u" in markdown
+    assert "margin `+0.420`" not in markdown
+    assert "không phải xác suất bệnh" in markdown
     assert "clip_emb" not in markdown
     assert "123.456" not in markdown
 
@@ -120,3 +122,28 @@ def test_render_reports_writes_local_md_and_html(tmp_path):
     html_text = html_path.read_text(encoding="utf-8")
     assert "<!doctype html>" in html_text.lower()
     assert "CASE001" in html_text
+
+
+def test_default_report_is_radiologist_first():
+    markdown = build_markdown(sample_predictions(), study_id="CASE001")
+
+    assert "## Đọc nhanh" in markdown
+    assert "## Các nhãn PRIMA vượt ngưỡng" in markdown
+    assert "## Các nhãn sát ngưỡng" in markdown
+    assert "## Gợi ý hội chẩn / chuyên khoa" in markdown
+    assert "## Giới hạn cần nhớ khi đọc kết quả" in markdown
+    assert "tumor_adult_glioma" not in markdown
+    assert "nl-stroke" not in markdown
+    assert "margin `+0.420`" not in markdown
+
+
+def test_show_all_scores_exposes_model_details_only_on_request():
+    markdown = build_markdown(
+        sample_predictions(),
+        study_id="CASE001",
+        show_all_scores=True,
+    )
+
+    assert "## Chi tiết mô hình" in markdown
+    assert "tumor_adult_glioma" in markdown
+    assert "margin `+0.420`" in markdown
