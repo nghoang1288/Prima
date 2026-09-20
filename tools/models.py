@@ -1,3 +1,4 @@
+import inspect
 import json
 import pickle
 import sys
@@ -281,19 +282,31 @@ class ModelLoader:
             if missing_params:
                 raise ValueError(f"Missing required parameters: {missing_params}")
 
-            # Initialize the model
-            vqvae_model = VQVAE(
-                spatial_dims=params["spatial_dims"],
-                in_channels=params["in_channels"],
-                out_channels=params["out_channels"],
-                num_res_layers=params["num_res_layers"],
-                downsample_parameters=params["downsample_parameters"],
-                upsample_parameters=params["upsample_parameters"],
-                num_channels=params["num_channels"],
-                num_res_channels=params["num_res_channels"],
-                num_embeddings=params["num_embeddings"],
-                embedding_dim=params["embedding_dim"],
-            )
+            # Initialize the model. MONAI Generative used the name
+            # "num_channels"; MONAI core 1.6 renamed this constructor argument
+            # to "channels". Keep the published PRIMA config schema compatible
+            # with both implementations.
+            vqvae_kwargs = {
+                "spatial_dims": params["spatial_dims"],
+                "in_channels": params["in_channels"],
+                "out_channels": params["out_channels"],
+                "num_res_layers": params["num_res_layers"],
+                "downsample_parameters": params["downsample_parameters"],
+                "upsample_parameters": params["upsample_parameters"],
+                "num_res_channels": params["num_res_channels"],
+                "num_embeddings": params["num_embeddings"],
+                "embedding_dim": params["embedding_dim"],
+            }
+            vqvae_signature = inspect.signature(VQVAE.__init__).parameters
+            channel_values = params.get("channels", params.get("num_channels"))
+            if channel_values is None:
+                raise ValueError("Missing VQ-VAE channels/num_channels")
+            if "channels" in vqvae_signature:
+                vqvae_kwargs["channels"] = channel_values
+            else:
+                vqvae_kwargs["num_channels"] = channel_values
+
+            vqvae_model = VQVAE(**vqvae_kwargs)
 
             # Load pretrained weights if checkpoint path is provided
             if 'ckpt_path' in params and params['ckpt_path']:
