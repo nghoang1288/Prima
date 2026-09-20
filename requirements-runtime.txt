@@ -14,10 +14,10 @@ natsort>=8.4,<9
 tqdm>=4.67,<5
 pyyaml>=6.0,<7
 psutil>=7.0,<8
-einops>=0.8,<1
-positional-encodings>=6.0,<7
-perceiver-pytorch>=0.8,<1
-transformers>=4.49,<5
+einops==0.8.1
+positional-encodings==6.0.3
+perceiver-pytorch==0.8.8
+transformers==4.49.0
 
 # torchao is optional; install requirements-quant.txt to prefer TorchAO INT8.
 # The runtime automatically falls back to PyTorch dynamic INT8 when absent.
