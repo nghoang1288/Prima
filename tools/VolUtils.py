@@ -156,59 +156,67 @@ def tokenize_volume(
     volume: Union[np.ndarray, torch.Tensor],
     mask_perc: int = 50
 ) -> Tuple[List[torch.Tensor], List[Tuple[int, int, int]], List[float], Tuple[int, int, int], List[int], Optional[int]]:
-    """
-    Chop a volume into patches and collect relevant information.
-    
-    Args:
-        volume: Input volume as numpy array or torch tensor
-        mask_perc: Percentage threshold for masking
-        
-    Returns:
-        Tuple containing:
-        - List of patches
-        - List of patch coordinates
-        - List of patch values
-        - Volume shape
-        - Patch shape
-        - Z dimension index
+    """Vectorized volume patchification with legacy-compatible ordering.
+
+    Patches are emitted in z/y/x-major order, matching the historical nested
+    Python loops, but extraction and mask statistics are computed with tensor
+    unfold operations. Input is normalized to float32 to avoid the old
+    float64 RAM amplification.
     """
     try:
         start = time.time()
-        img = volume
-        patch_size, z_idx = adjusted_patch_shape(img.shape)
-        logging.info(f"Patch shape is {patch_size}")
-        
-        padded_volume = pad_volume_for_patches(img, patch_size)
-        z_patches = padded_volume.shape[0] // patch_size[0]
-        y_patches = padded_volume.shape[1] // patch_size[1]
-        x_patches = padded_volume.shape[2] // patch_size[2]
+        if isinstance(volume, np.ndarray):
+            img = torch.from_numpy(np.asarray(volume, dtype=np.float32))
+        else:
+            img = volume.detach().to(dtype=torch.float32, device='cpu')
 
+        patch_size, z_idx = adjusted_patch_shape(tuple(img.shape))
+        logging.info(f"Patch shape is {patch_size}")
+
+        padded_volume = pad_volume_for_patches(img, patch_size).contiguous()
         mask_ = percentile_mask(padded_volume, mask_perc)
         scaled_padded_vol = scale(padded_volume)
-        patches = []
-        coordinates = []
-        values_ = []
 
-        for z in range(z_patches):
-            for y in range(y_patches):
-                for x in range(x_patches):
-                    z_start = z * patch_size[0]
-                    y_start = y * patch_size[1]
-                    x_start = x * patch_size[2]
-                    patch = scaled_padded_vol[z_start:z_start + patch_size[0],
-                                            y_start:y_start + patch_size[1],
-                                            x_start:x_start + patch_size[2]]
-                    otsu_test = mask_[z_start:z_start + patch_size[0],
-                                    y_start:y_start + patch_size[1],
-                                    x_start:x_start + patch_size[2]]
-                    patches.append(patch)
-                    coordinates.append((z_start, y_start, x_start))
-                    values_.append(np.mean(otsu_test.numpy()) * 100)
+        p0, p1, p2 = patch_size
+        patch_view = (
+            scaled_padded_vol
+            .unfold(0, p0, p0)
+            .unfold(1, p1, p1)
+            .unfold(2, p2, p2)
+        )
+        mask_view = (
+            mask_
+            .unfold(0, p0, p0)
+            .unfold(1, p1, p1)
+            .unfold(2, p2, p2)
+        )
+
+        # Contiguous reshape preserves the legacy z -> y -> x iteration order.
+        patches_tensor = patch_view.contiguous().view(-1, p0, p1, p2)
+        values_tensor = (
+            mask_view.to(torch.float32)
+            .mean(dim=(-1, -2, -3))
+            .reshape(-1)
+            .mul(100.0)
+        )
+
+        z_starts = torch.arange(0, padded_volume.shape[0], p0, dtype=torch.long)
+        y_starts = torch.arange(0, padded_volume.shape[1], p1, dtype=torch.long)
+        x_starts = torch.arange(0, padded_volume.shape[2], p2, dtype=torch.long)
+        zz, yy, xx = torch.meshgrid(z_starts, y_starts, x_starts, indexing='ij')
+        coords_tensor = torch.stack((zz, yy, xx), dim=-1).reshape(-1, 3)
+
+        patches = list(patches_tensor.unbind(0))
+        coordinates = [tuple(map(int, row)) for row in coords_tensor.tolist()]
+        values_ = values_tensor.tolist()
 
         elapsed_time = time.time() - start
-        logging.info(f"Finished chopping volume into patches in {elapsed_time:.2f} seconds")
+        logging.info(
+            'Finished vectorized volume patchification: %d patches in %.2f seconds',
+            len(patches), elapsed_time,
+        )
 
-        return patches, coordinates, values_, padded_volume.shape, patch_size, z_idx
+        return patches, coordinates, values_, tuple(padded_volume.shape), patch_size, z_idx
     except Exception as e:
         raise RuntimeError(f"Failed to tokenize volume: {str(e)}")
 
