@@ -11,14 +11,22 @@ The primary target is **one MRI study at a time on an NVIDIA RTX 4060 8 GB**.
   full resampled study in RAM.
 - Preprocessing uses float32 rather than the previous float64 intermediate copy.
 - 3D patch extraction is vectorized with PyTorch unfold operations.
-- VQ-VAE runs in bounded FP16-autocast chunks and is fully released before PRIMA.
+- Only the VQ-VAE encoder is moved to CUDA; decoder/codebook stay off GPU.
+- VQ-VAE runs in bounded FP16 chunks and is fully released before PRIMA.
+- Tokenizer chunk size automatically backs off on CUDA OOM down to a safe minimum.
 - The full checkpoint stays in CPU RAM in low-VRAM mode.
 - Only the PRIMA visual backbone is moved to CUDA in FP16.
 - Diagnosis, referral, and priority heads run on CPU.
-- CPU heads can optionally use dynamic INT8 quantization.
+- CPU heads can optionally use dynamic INT8 quantization; the conservative
+  default is PyTorch dynamic INT8, with TorchAO 0.18 as an A/B backend.
 - Attention selects between native PyTorch variable-length attention,
   external flash-attn, and PyTorch SDPA at runtime.
 - External flash-attn is no longer a mandatory runtime dependency.
+- Per-series visual inputs remain ragged instead of being padded twice on GPU.
+- 3D positional encodings are generated only for used coordinates rather than
+  allocating the historical ~120 MB fixed grid.
+- Checkpoint loading uses mmap where supported; VQ-VAE also uses meta-device
+  construction plus assign=True when possible.
 - Every run writes timing, CPU RSS, CUDA allocated/reserved memory, and peak VRAM.
 - Regression utilities compare optimized predictions to a baseline case.
 
@@ -36,14 +44,16 @@ pip install --upgrade pip
 pip install -r requirements-runtime.txt
 ```
 
-For the preferred TorchAO INT8 backend, optionally install:
+For experimental TorchAO 0.18 A/B testing, optionally install:
 
 ```bash
 pip install -r requirements-quant.txt
 ```
 
-If TorchAO is absent or incompatible, the optimized profile automatically falls
-back to PyTorch dynamic INT8 rather than failing.
+The default optimized profile does not require TorchAO. To test it, set
+`head_quant_backend: "torchao"` after installing `requirements-quant.txt`.
+The runtime fails explicitly if that backend is requested but unavailable,
+rather than silently changing quantization during a medical inference run.
 
 If PyTorch needs a CUDA-specific wheel on your platform, install the matching
 PyTorch 2.14 build from the official PyTorch selector first, then install the
@@ -103,7 +113,9 @@ python end-to-end_inference_pipeline/pipeline.py \
   --config configs/rtx4060_8gb_optimized.yaml
 ```
 
-INT8 uses TorchAO when compatible and falls back to PyTorch dynamic INT8 on CPU.
+The default optimized profile uses PyTorch dynamic INT8 on CPU. TorchAO 0.18 is
+available only as an explicit A/B backend because current CPU performance is
+workload-dependent.
 
 ## 4. Compare predictions
 
@@ -165,9 +177,13 @@ If VQ-VAE OOMs, reduce:
 
 ```yaml
 max_tokens_per_chunk: 96
+min_tokens_per_chunk: 16
+auto_reduce_tokenizer_chunk: true
 ```
 
-to 64, then 48, then 32.
+The runtime automatically retries 96 -> 48 -> 24 -> 16 when tokenizer OOM is
+encountered. This auto-backoff is intentionally limited to the independently
+chunkable VQ-VAE stage.
 
 If PRIMA visual inference OOMs, tokenizer chunk size will not help because the
 tokenizer has already been released. Keep:
@@ -177,6 +193,9 @@ low_vram: true
 visual_dtype: "float16"
 compile_visual: false
 attention_backend: "auto"
+tokenizer_encoder_only: true
+tokenizer_dtype: "float16"
+prune_inference_only: true
 ```
 
 and inspect the PRIMA-stage peak. You can force:
@@ -230,3 +249,24 @@ The repository-level CPU tests verify the vectorized patch extraction and SDPA
 attention math. The full 4060 path cannot be considered hardware-validated until
 the official weights and at least one real DICOM study have been run on the
 target machine. Use the baseline/optimized comparison above for that validation.
+
+
+## September 2026 audit
+
+The detailed technology and code audit is maintained in
+[`AUDIT_2026_09.md`](AUDIT_2026_09.md).
+
+Important decisions for the RTX 4060 target:
+
+- PyTorch 2.14 + MONAI 1.6 are the current baseline.
+- Native PyTorch variable-length attention / SDPA are preferred over chasing
+  FlashAttention 4, which is not the Ada-oriented target.
+- NestedTensor/jagged is not used because it remains a prototype API.
+- INT4 CPU heads and FP8/FP4 visual inference remain experimental follow-ups.
+- `torch.compile` stays off until eager-mode VRAM and latency are measured.
+- A safetensors-only full Prima checkpoint remains deferred until the official
+  full-object checkpoint is audited exactly.
+
+For WSL2, `PYTORCH_ALLOC_CONF=expandable_segments:True` is worth an A/B test
+if allocator fragmentation is observed, but it is not hard-coded because the
+option remains experimental.
