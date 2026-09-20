@@ -28,6 +28,25 @@ def filtercoords(meta,percentagetouse,embs,fillhole=True, debuginfo='None'):
     return embs[useids],embspos,useids
 
 
+def select_otsu_indices(meta, total_count, start_percentage=5, min_count=25):
+    """Resolve the same Otsu selection used by PRIMA before encoding patches.
+
+    Selection depends only on metadata, not on VQ-VAE embeddings. Returning the
+    original patch indices lets inference encode only the patches that would
+    survive the historical post-encoding filter.
+    """
+    dummy = torch.arange(total_count, dtype=torch.long)
+    chosen = None
+    for percent in range(start_percentage, -1, -1):
+        _, positions, useids = filtercoords(meta, percent, dummy)
+        chosen = (useids, positions, percent)
+        if len(positions) > min_count:
+            break
+    if chosen is None:
+        raise RuntimeError("Could not resolve Otsu token selection")
+    return chosen
+
+
 def chartovec(s: str) -> torch.Tensor:
     """Convert a string to a tensor of character indices.
     
