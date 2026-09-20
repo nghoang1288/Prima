@@ -67,29 +67,43 @@ class FullMRIModel(torch.nn.Module):
             'clip_emb': clip_embed.detach().float().cpu(),
         }
 
+        # Cache per-module outputs so historical alias/shared head objects are
+        # evaluated once per study even if referenced by multiple labels.
+        head_output_cache = {}
+
         print('Running diagnostic heads ...')
         for name in tqdm(self.diagnosisheads):
             head, idx = self.diagnosisheads[name]
-            if heads_on_cpu:
-                head.cpu()
-                retdict['diagnosis'][name] = head(cpu_embed)[:, idx] - head.thresh
-            else:
-                head.to(clip_embed.device)
-                retdict['diagnosis'][name] = head(clip_embed)[:, idx] - head.thresh
-                if inference_only_once:
+            cache_key = id(head)
+            if cache_key not in head_output_cache:
+                if heads_on_cpu:
                     head.cpu()
+                    head_output_cache[cache_key] = head(cpu_embed)
+                else:
+                    head.to(clip_embed.device)
+                    head_output_cache[cache_key] = head(clip_embed)
+            retdict['diagnosis'][name] = (
+                head_output_cache[cache_key][:, idx] - head.thresh
+            )
+            if not heads_on_cpu and inference_only_once:
+                head.cpu()
 
         print('Running referral heads ...')
         for name in tqdm(self.referralheads):
             head, idx = self.referralheads[name]
-            if heads_on_cpu:
-                head.cpu()
-                retdict['referral'][name] = head(cpu_embed)[:, idx] - head.thresh
-            else:
-                head.to(clip_embed.device)
-                retdict['referral'][name] = head(clip_embed)[:, idx] - head.thresh
-                if inference_only_once:
+            cache_key = id(head)
+            if cache_key not in head_output_cache:
+                if heads_on_cpu:
                     head.cpu()
+                    head_output_cache[cache_key] = head(cpu_embed)
+                else:
+                    head.to(clip_embed.device)
+                    head_output_cache[cache_key] = head(clip_embed)
+            retdict['referral'][name] = (
+                head_output_cache[cache_key][:, idx] - head.thresh
+            )
+            if not heads_on_cpu and inference_only_once:
+                head.cpu()
 
         print('Running prioritization head ...')
         priority_input = cpu_embed if heads_on_cpu else clip_embed
@@ -465,7 +479,7 @@ class ModelLoader:
 
                     def _quantize_one(module: torch.nn.Module) -> torch.nn.Module:
                         module = module.cpu().eval()
-                        quantize_(module, Int8DynamicActivationInt8WeightConfig())
+                        quantize_(module, Int8DynamicActivationInt8WeightConfig(version=2))
                         return module
                 except Exception as exc:
                     quantizer_name = 'torch.ao.dynamic'
