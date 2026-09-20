@@ -369,10 +369,23 @@ class Pipeline:
                             chunk = tokens[start_idx:end_idx].unsqueeze(1)
                             token_list.append(chunk)
 
-                        embeddings = [
-                            vqvae.encode(chunk.to(self.config.device)).detach().cpu()
-                            for chunk in token_list
-                        ]
+                        embeddings = []
+                        for chunk in token_list:
+                            chunk = chunk.to(self.config.device, non_blocking=True)
+                            if (
+                                self.config.low_vram
+                                and torch.cuda.is_available()
+                                and "cuda" in str(self.config.device)
+                            ):
+                                with torch.amp.autocast(
+                                    device_type="cuda",
+                                    dtype=torch.float16,
+                                ):
+                                    emb = vqvae.encode(chunk)
+                            else:
+                                emb = vqvae.encode(chunk)
+                            embeddings.append(emb.detach().cpu())
+                            del chunk, emb
                         series_embedding = torch.cat(embeddings, dim=0)
                         series_embeddings.append(series_embedding)
                         if filtered_names is not None:
