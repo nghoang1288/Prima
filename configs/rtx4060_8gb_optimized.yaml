@@ -1,0 +1,51 @@
+# Optimized single-study profile for ASUS/other RTX 4060 8 GB cards.
+# Compare predictions against rtx4060_8gb_baseline.yaml before routine use.
+
+study_dir: "path/to/your/study"
+output_dir: "output/4060-optimized"
+study_description: "MRI BRAIN WO AND W CONTRAST"
+study_id: "CASE001"
+redact_source_path: true
+redact_series_names: true
+
+tokenizer_model_config: "configs/sample_tokenizer_config.json"
+prima_model_config: "configs/sample_prima_config.json"
+
+batch_size: 1
+device: "cuda"
+stream_dicom: true
+fail_on_series_error: true
+low_vram: true
+visual_dtype: "float16"
+prune_inference_only: true
+release_cpu_token_state_before_prima: true
+
+# Keep VQ-VAE encoder FP32 by default to match upstream tokenizer precision.
+# Encoder-only placement, pre-VQ filtering and chunk backoff provide the 8 GB savings.
+tokenizer_encoder_only: true
+tokenizer_dtype: "float32"
+max_tokens_per_chunk: 96
+min_tokens_per_chunk: 4
+auto_reduce_tokenizer_chunk: true
+attention_backend: "auto"
+
+# Biggest RAM optimization. For CPU heads, PyTorch dynamic INT8 is the
+# conservative default; TorchAO 0.18 remains an A/B experimental backend.
+quantize_cpu_heads: true
+head_quant_backend: "torch_dynamic"
+
+# Leave compile off for the first real case. Enable only after baseline metrics
+# show stable shapes and enough VRAM headroom.
+compile_visual: false
+compile_mode: "max-autotune-no-cudagraphs"
+
+otsu_percentage: 5
+prefilter_otsu_before_vq: true
+log_cuda_memory: true
+save_runtime_metrics: true
+
+# Human-readable local reports (raw JSON remains authoritative)
+render_human_report: true
+report_language: "vi"
+report_near_margin: 0.25
+report_show_all_scores: false

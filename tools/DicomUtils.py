@@ -5,7 +5,7 @@ import re
 import uuid
 import SimpleITK as sitk
 import pydicom as pyd
-from typing import Dict, List, Optional, Tuple, Union
+from typing import Dict, Iterator, List, Optional, Tuple, Union
 from pathlib import Path
 
 
@@ -134,7 +134,11 @@ class DicomUtils:
 
             return combined_name
         except Exception as e:
-            logging.error(f"Error reading DICOM file {dicom_file_path}: {e}")
+            logging.error(
+                "Error reading DICOM metadata from file %s: %s",
+                Path(dicom_file_path).name,
+                e,
+            )
             return None
 
     @staticmethod
@@ -188,8 +192,18 @@ class DicomUtils:
         """
         try:
             reader = sitk.ImageSeriesReader()
-            dicom_names = reader.GetGDCMSeriesFileNames(directory)
-            dicom_names = natsort.natsorted(DicomUtils.filter_dicom_series(dicom_names))
+            # GetGDCMSeriesFileNames already returns scan-direction ordering
+            # derived from DICOM geometry. Re-sorting by filename can corrupt
+            # slice order when exported filenames do not follow Image Position.
+            dicom_names = list(reader.GetGDCMSeriesFileNames(directory))
+            original_instance_count = len(dicom_names)
+            dicom_names = DicomUtils.filter_dicom_series(dicom_names)
+            if len(dicom_names) != original_instance_count:
+                logging.warning(
+                    "DICOM size filter kept %d/%d instances in one series",
+                    len(dicom_names),
+                    original_instance_count,
+                )
             reader.SetFileNames(dicom_names)
             logging.info('*' * 10)
             
@@ -245,53 +259,66 @@ class DicomUtils:
             raise RuntimeError(f"Failed to read DICOM series: {str(e)}")
 
     @staticmethod
-    def load_mri_study(study_dir: str) -> Tuple[List[sitk.Image], List[str]]:
+    def iter_mri_study(
+        study_dir: str,
+        fail_on_error: bool = False,
+    ) -> Iterator[Tuple[sitk.Image, str, str]]:
+        """Yield one processed DICOM series at a time.
+
+        Returns tuples of (image, series_name, source_directory). Invalid series
+        are logged and skipped. Streaming keeps only one resampled volume in RAM,
+        which is preferable for single-study inference on workstation hardware.
         """
-        Load all series from an MRI study directory.
-        
-        Args:
-            study_dir: Path to study directory
-            
-        Returns:
-            Tuple of (list of series images, list of series names extracted from DICOM metadata)
-        """
+        series_list = natsort.natsorted(os.listdir(study_dir))
+        yielded = 0
+        for series in series_list:
+            series_path = os.path.join(study_dir, series)
+            if not os.path.isdir(series_path):
+                logging.debug("Skipping non-directory study entry: %s", series)
+                continue
+            try:
+                series_image, dicom_files, _ = DicomUtils.read_dicom_series(series_path)
+                series_name = None
+                if dicom_files:
+                    series_name = DicomUtils.get_series_name(dicom_files[0])
+                if not series_name:
+                    logging.warning(
+                        f"Could not extract series name from {series}, using directory name"
+                    )
+                    series_name = series
+                yielded += 1
+                yield series_image, series_name, series_path
+            except Exception as e:
+                if fail_on_error:
+                    raise RuntimeError(
+                        f"Failed to load configured series directory: {series}"
+                    ) from e
+                logging.warning(
+                    "Failed to load series %s: %s. Skipping...",
+                    series,
+                    str(e),
+                )
+                continue
+        if yielded == 0:
+            raise RuntimeError("No valid series found in configured study directory")
+
+    @staticmethod
+    def load_mri_study(
+        study_dir: str,
+        fail_on_error: bool = False,
+    ) -> Tuple[List[sitk.Image], List[str]]:
+        """Load all series into memory (legacy compatibility path)."""
         try:
             logging.info('Loading MRI studies')
-            series_list = natsort.natsorted(os.listdir(study_dir))
             mri_study = []
             valid_series_list = []
-            
-            for series in series_list:
-                series_path = os.path.join(study_dir, series)
-                # Skip if not a directory
-                if not os.path.isdir(series_path):
-                    logging.warning(f"Skipping {series}: not a directory")
-                    continue
-                    
-                try:
-                    series_image, dicom_files, _ = DicomUtils.read_dicom_series(series_path)
-                    
-                    # Extract series name from first DICOM file
-                    series_name = None
-                    if dicom_files and len(dicom_files) > 0:
-                        series_name = DicomUtils.get_series_name(dicom_files[0])
-                    
-                    # Fallback to directory name if series name extraction failed
-                    if not series_name:
-                        logging.warning(f"Could not extract series name from {series}, using directory name")
-                        series_name = series
-                    
-                    mri_study.append(series_image)
-                    valid_series_list.append(series_name)
-                except Exception as e:
-                    logging.warning(f"Failed to load series {series}: {str(e)}. Skipping...")
-                    continue
-                
-            if len(mri_study) == 0:
-                raise RuntimeError(f"No valid series found in {study_dir}")
-                
+            for image, series_name, _ in DicomUtils.iter_mri_study(
+                study_dir,
+                fail_on_error=fail_on_error,
+            ):
+                mri_study.append(image)
+                valid_series_list.append(series_name)
             return mri_study, valid_series_list
-            
         except Exception as e:
             raise RuntimeError(f"Failed to load MRI study: {str(e)}")
 

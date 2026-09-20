@@ -1,0 +1,52 @@
+# Golden-output profile for an RTX 4060 8 GB.
+# Low VRAM placement is enabled, but task heads remain FP32 on CPU so this is
+# the preferred first run for regression comparisons.
+
+study_dir: "path/to/your/study"
+output_dir: "output/4060-baseline"
+study_description: "MRI BRAIN WO AND W CONTRAST"
+study_id: "CASE001"
+redact_source_path: true
+redact_series_names: true
+
+tokenizer_model_config: "configs/sample_tokenizer_config.json"
+prima_model_config: "configs/sample_prima_config.json"
+
+batch_size: 1
+device: "cuda"
+stream_dicom: true
+fail_on_series_error: true
+low_vram: true
+visual_dtype: "float16"
+prune_inference_only: true
+release_cpu_token_state_before_prima: true
+
+# Reference tokenizer precision: upstream VQ-VAE inference is FP32.
+# Encoder-only placement + chunk backoff still minimizes 8 GB VRAM usage.
+tokenizer_encoder_only: true
+tokenizer_dtype: "float32"
+
+# Conservative tokenizer chunk for 8 GB Ada. Increase after measuring peak VRAM.
+max_tokens_per_chunk: 96
+min_tokens_per_chunk: 4
+auto_reduce_tokenizer_chunk: true
+
+# Let PyTorch choose native varlen first and SDPA fallback automatically.
+attention_backend: "auto"
+
+# Golden output: no head quantization, no compiler transforms.
+quantize_cpu_heads: false
+head_quant_backend: "torch_dynamic"
+compile_visual: false
+compile_mode: "default"
+
+otsu_percentage: 5
+prefilter_otsu_before_vq: false
+log_cuda_memory: true
+save_runtime_metrics: true
+
+# Human-readable local reports (raw JSON remains authoritative)
+render_human_report: true
+report_language: "vi"
+report_near_margin: 0.25
+report_show_all_scores: false

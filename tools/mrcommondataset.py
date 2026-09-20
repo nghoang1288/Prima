@@ -24,7 +24,7 @@ class MrVoxelDataset(Dataset):
         volume = self.series_volumes[idx]
         # tokenize_volume expects numpy/torch with .shape; convert SimpleITK Image if needed
         if sitk is not None and hasattr(volume, "GetSize"):
-            volume = np.asarray(sitk.GetArrayFromImage(volume), dtype=np.float64)
+            volume = np.asarray(sitk.GetArrayFromImage(volume), dtype=np.float32)
         
         tokens, coords, otsu, pad_shape, patch_shape, z_idx = tokenize_volume(volume,
                                                               mask_perc=50)
@@ -33,7 +33,7 @@ class MrVoxelDataset(Dataset):
 
         ser_emb_meta = {
                     'PaddedVolShape': pad_shape,
-                    'PatchShape': patch_shape,
+                    'PatchShape': list(patch_shape),
                     'OtsuThresholds': otsu_thresholds,
                     'emb_index': {idx: coord for idx, coord in enumerate(coords)}
                 }
@@ -42,9 +42,10 @@ class MrVoxelDataset(Dataset):
             print("No tokens found for a certain sequence in the study.")
             return torch.tensor([]), ser_emb_meta
 
-        patch_shape[z_idx] = 8  #upsacling due to vqvae
+        vq_patch_shape = list(patch_shape)
+        vq_patch_shape[z_idx] = 8  # upscaling required by the VQ-VAE
         try:
-            tokens = resize_tokens_batch(tokens, patch_shape)
+            tokens = resize_tokens_batch(tokens, vq_patch_shape)
         except Exception as e:
             print(f"Error resizing tokens for volume {idx}: {e}")
             return torch.tensor([]), ser_emb_meta
@@ -52,37 +53,69 @@ class MrVoxelDataset(Dataset):
 
 
 # Generate otsu thresholds dictionary TODO: add filling hole coords upto threhold of 20
-def generate_otsu_thresholds(coordinates,
-                             otsu,
-                             vol_shape,
-                             patch_shape,
-                             find_holes=True,
-                             find_holes_threshold=20,
-                             step=1):
+def generate_otsu_thresholds(
+    coordinates,
+    otsu,
+    vol_shape,
+    patch_shape,
+    find_holes=True,
+    find_holes_threshold=20,
+    step=1,
+):
+    """Build Otsu metadata using patch-grid topology.
+
+    The historical implementation materialized a full voxel-resolution boolean
+    volume and ran scipy.binary_fill_holes for every threshold bin <= 20. Since
+    coordinates are aligned to non-overlapping patches and vol_shape is padded
+    to patch-size multiples, the same topology can be represented on the much
+    smaller patch occupancy grid.
+    """
     thresholds = list(range(0, 102, step))
-    otsu_dict = {}
+    otsu_dict = {
+        threshold: {"OutfillCoords": []}
+        for threshold in thresholds
+    }
+
+    # One pass instead of re-scanning every coordinate for every threshold.
+    for idx, (coord, value) in enumerate(zip(coordinates, otsu)):
+        # Preserve legacy [threshold, threshold + step) binning behavior.
+        threshold = int(float(value) // step) * step
+        threshold = max(0, min(101, threshold))
+        if threshold in otsu_dict and value >= threshold and value < threshold + step:
+            otsu_dict[threshold]["OutfillCoords"].append((idx, coord))
+
+    if not find_holes:
+        return otsu_dict
+
+    pz, py, px = patch_shape
+    grid_shape = (
+        int(vol_shape[0] // pz),
+        int(vol_shape[1] // py),
+        int(vol_shape[2] // px),
+    )
 
     for threshold in thresholds:
-        threshold_coords = [(idx, coordinates[idx]) for idx, val in \
-                            enumerate(otsu) if val>=threshold \
-                            and val<threshold+step]
-        otsu_dict[threshold] = {}
-        otsu_dict[threshold]['OutfillCoords'] = threshold_coords
+        if threshold > find_holes_threshold:
+            break
 
-        highlight_coords = [coord[1] for coord in threshold_coords]
-        if find_holes:
-            if threshold <= find_holes_threshold:
-                filled_coords = find_fully_filled_patches(
-                    create_filled_mask(vol_shape,
-                                       highlight_coords,
-                                       patch_size=patch_shape),
-                    patch_size=patch_shape)
-                otsu_dict[threshold]['InfillCoords'] = [
-                    (z, y, x) for (z, y, x) in filled_coords
-                    if (z, y, x) not in highlight_coords
-                ]
+        threshold_coords = otsu_dict[threshold]["OutfillCoords"]
+        if not threshold_coords:
+            otsu_dict[threshold]["InfillCoords"] = []
+            continue
+
+        occupancy = np.zeros(grid_shape, dtype=np.bool_)
+        for _, (z, y, x) in threshold_coords:
+            occupancy[z // pz, y // py, x // px] = True
+
+        filled = ndi.binary_fill_holes(occupancy)
+        infill_grid = np.argwhere(filled & ~occupancy)
+        otsu_dict[threshold]["InfillCoords"] = [
+            (int(gz * pz), int(gy * py), int(gx * px))
+            for gz, gy, gx in infill_grid
+        ]
 
     return otsu_dict
+
 
 def create_filled_mask(original_shape,
                        highlight_coords,

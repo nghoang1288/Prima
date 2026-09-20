@@ -1,5 +1,8 @@
+import logging
+import os
 import torch
 import math
+import torch.nn.functional as F
 from typing import Dict, List, Tuple, Optional, Union, Callable
 from torch import nn
 from perceiver_pytorch import Perceiver
@@ -7,10 +10,19 @@ from einops import rearrange, repeat
 from positional_encodings.torch_encodings import PositionalEncoding1D
 from einops.layers.torch import Rearrange
 try:
+    from torch.nn.attention.varlen import varlen_attn as torch_varlen_attn
+except (ImportError, AttributeError):
+    torch_varlen_attn = None
+
+try:
     from flash_attn import flash_attn_qkvpacked_func, flash_attn_varlen_qkvpacked_func
 except ImportError:
     flash_attn_qkvpacked_func = None
     flash_attn_varlen_qkvpacked_func = None
+# Avoid repeating the same backend line for every transformer layer.
+_REPORTED_ATTENTION_BACKENDS = set()
+
+
 # helpers
 
 
@@ -71,7 +83,11 @@ class FeedForward(nn.Module):
 
 
 class Attention(nn.Module):
-    """Multi-head attention with optional flash attention support."""
+    """Multi-head attention with capability-based backend selection.
+
+    Auto order: PyTorch native varlen, external flash-attn, then SDPA.
+    Override with PRIMA_ATTENTION_BACKEND=auto|native|flash|sdpa.
+    """
 
     def __init__(self,
                  dim: int,
@@ -87,61 +103,142 @@ class Attention(nn.Module):
         self.heads = heads
         self.dim_head = dim_head
         self.scale = dim_head**-0.5
-
         self.attend = nn.Softmax(dim=-1)
         self.dropout = nn.Dropout(dropout)
         self.dropoutp = dropout
         self.causal = causal
-
         self.to_qkv = nn.Linear(dim, inner_dim * 3, bias=False)
-
         self.to_out = nn.Sequential(
             nn.Linear(inner_dim, dim),
             nn.Dropout(dropout)) if project_out else nn.Identity()
+
+    def _backend(self) -> str:
+        if hasattr(self, 'noflashattn') and self.noflashattn:
+            return 'sdpa'
+        requested = os.environ.get('PRIMA_ATTENTION_BACKEND', 'auto').lower()
+        if requested not in {'auto', 'native', 'flash', 'sdpa'}:
+            raise ValueError(
+                'PRIMA_ATTENTION_BACKEND must be auto, native, flash, or sdpa'
+            )
+        if requested != 'auto':
+            return requested
+        if torch_varlen_attn is not None:
+            return 'native'
+        if flash_attn_varlen_qkvpacked_func is not None:
+            return 'flash'
+        return 'sdpa'
 
     def forward(self, x: torch.Tensor, culen: torch.Tensor,
                 mxlen: torch.Tensor) -> torch.Tensor:
         if not hasattr(self, 'causal'):
             self.causal = False
-        bxs, embsize = x.size()
+
+        bxs, _ = x.size()
         qkv = self.to_qkv(x).view(bxs, 3, self.heads, self.dim_head)
-        if (hasattr(self, 'noflashattn') and self.noflashattn) or flash_attn_varlen_qkvpacked_func is None:
-            out = no_flash_attn_varlen_substitute(qkv, culen.type(torch.int32))
-        else:
-            out = flash_attn_varlen_qkvpacked_func(
-                qkv,
-                culen.type(torch.int32),
-                mxlen,
-                dropout_p=self.dropoutp,
-                causal=self.causal)  # flash attention!
+        cu = culen.to(device=x.device, dtype=torch.int32)
+        max_len = int(mxlen.item()) if isinstance(mxlen, torch.Tensor) else int(mxlen)
+        dropout_p = self.dropoutp if self.training else 0.0
+        backend = self._backend()
+        # Native varlen currently has no dropout_p argument. Preserve training
+        # semantics by using flash-attn/SDPA when attention dropout is active.
+        if backend == 'native' and self.training and dropout_p > 0:
+            backend = 'flash' if flash_attn_varlen_qkvpacked_func is not None else 'sdpa'
+
+        if backend == 'native':
+            if torch_varlen_attn is None:
+                if os.environ.get('PRIMA_ATTENTION_BACKEND', 'auto').lower() == 'native':
+                    raise RuntimeError('Native PyTorch varlen attention is unavailable')
+                backend = 'flash' if flash_attn_varlen_qkvpacked_func is not None else 'sdpa'
+            else:
+                q, k, v = qkv.unbind(dim=1)
+                try:
+                    out = torch_varlen_attn(
+                        query=q,
+                        key=k,
+                        value=v,
+                        cu_seq_q=cu,
+                        cu_seq_k=cu,
+                        max_q=max_len,
+                        max_k=max_len,
+                        scale=self.scale,
+                        window_size=(-1, 0) if self.causal else (-1, -1),
+                    )
+                except torch.OutOfMemoryError:
+                    # OOM is a capacity problem, not a backend capability miss.
+                    # Retrying another attention implementation can worsen peak
+                    # memory and obscure the actual 8 GB limit.
+                    raise
+                except (RuntimeError, NotImplementedError, ValueError, TypeError):
+                    if os.environ.get('PRIMA_ATTENTION_BACKEND', 'auto').lower() == 'native':
+                        raise
+                    backend = 'flash' if flash_attn_varlen_qkvpacked_func is not None else 'sdpa'
+
+        if backend == 'flash':
+            if flash_attn_varlen_qkvpacked_func is None:
+                if os.environ.get('PRIMA_ATTENTION_BACKEND', 'auto').lower() == 'flash':
+                    raise RuntimeError('flash-attn backend requested but package is unavailable')
+                backend = 'sdpa'
+            else:
+                out = flash_attn_varlen_qkvpacked_func(
+                    qkv,
+                    cu,
+                    max_len,
+                    dropout_p=dropout_p,
+                    causal=self.causal,
+                )
+
+        if backend == 'sdpa':
+            out = sdpa_varlen(qkv, cu, dropout_p=dropout_p, causal=self.causal)
+
+        is_compiling = (
+            hasattr(torch, "compiler")
+            and torch.compiler.is_compiling()
+        )
+        if not is_compiling:
+            report_key = (backend, str(x.device), str(x.dtype))
+            if report_key not in _REPORTED_ATTENTION_BACKENDS:
+                _REPORTED_ATTENTION_BACKENDS.add(report_key)
+                logging.info(
+                    "PRIMA attention backend: %s device=%s dtype=%s",
+                    backend,
+                    x.device,
+                    x.dtype,
+                )
+
         out = out.flatten(start_dim=1)
-        assert len(out.size()) == 2
-        assert out.size()[-1] == self.inner_dim
+        assert out.ndim == 2
+        assert out.size(-1) == self.inner_dim
         return self.to_out(out)
 
 
-# attention function without using flash attention
+def sdpa_varlen(
+    qkv: torch.Tensor,
+    culen: torch.Tensor,
+    dropout_p: float = 0.0,
+    causal: bool = False,
+) -> torch.Tensor:
+    """Variable-length attention through PyTorch SDPA without batch padding."""
+    q, k, v = qkv.unbind(dim=1)
+    out = torch.empty_like(q)
+    boundaries = culen.detach().to(device='cpu', dtype=torch.int64).tolist()
+
+    for start, stop in zip(boundaries[:-1], boundaries[1:]):
+        if stop <= start:
+            continue
+        qs = q[start:stop].transpose(0, 1).unsqueeze(0)
+        ks = k[start:stop].transpose(0, 1).unsqueeze(0)
+        vs = v[start:stop].transpose(0, 1).unsqueeze(0)
+        ys = F.scaled_dot_product_attention(
+            qs, ks, vs, dropout_p=dropout_p, is_causal=causal
+        )
+        out[start:stop] = ys.squeeze(0).transpose(0, 1)
+    return out
+
+
 def no_flash_attn_varlen_substitute(qkv: torch.Tensor,
                                     culen: torch.Tensor) -> torch.Tensor:
-    """Fallback attention implementation when flash attention is not available."""
-    qkv = qkv.transpose(0, 1)
-    q, k, v = map(lambda t: rearrange(t, 'n h d -> h n d'), qkv)
-
-    n = qkv.size()[1]
-    h = qkv.size()[2]
-    d = qkv.size()[-1]
-    out = torch.zeros(h, n, d).to(qkv.device)
-    for i in range(len(culen) - 1):
-        dots = torch.matmul(
-            q[:, culen[i]:culen[i + 1]], k[:, culen[i]:culen[i + 1]].transpose(
-                -1, -2)) * (d**-0.5)
-        attn = torch.nn.functional.softmax(dots, dim=-1)
-        #print(attn)
-        out[:,
-            culen[i]:culen[i + 1]] = torch.matmul(attn,
-                                                  v[:, culen[i]:culen[i + 1]])
-    out = rearrange(out, 'h n d -> n (h d)')
-    return out
+    """Backward-compatible alias for the historical non-flash fallback."""
+    return sdpa_varlen(qkv, culen, dropout_p=0.0, causal=False)
 
 
 class Transformer(nn.Module):
@@ -254,32 +351,29 @@ class ViT(nn.Module):
             x += self.pos_embedding[:, :(n + 1)]
         x = self.dropout(x)
 
-        # this following part converts the batch of sequences into one long cumulated sequence for flashattn varlen
-        mxlen = n + self.clsnum  # max length in batch
-        cl = torch.cumsum(lens + self.clsnum,
-                          dim=0)  # cumulative sums of lengths
-        culen = torch.zeros(len(cl) + 1).long().to(cl.device)
-        culen[
-            1:] = cl  # cumulative sequence length used for flash attention input
-        nx = torch.zeros(culen[-1].item(), embsize).to(x.device)
-        for i in range(
-                len(cl)
-        ):  # move each input sequence into the concatenated long sequence
-            assert lens[i] + self.clsnum == culen[i + 1] - culen[i]
-            nx[culen[i]:culen[i + 1]] = x[i][0:lens[i] + self.clsnum]
-        x = nx
+        # Pack variable-length sequences without Python-side tensor copies.
+        # Row-major boolean indexing preserves the historical batch/token order.
+        lengths = (lens + self.clsnum).to(device=x.device, dtype=torch.long)
+        cl = torch.cumsum(lengths, dim=0)
+        culen = torch.cat((cl.new_zeros(1), cl), dim=0)
+        mxlen = lengths.max()
+        token_positions = torch.arange(x.size(1), device=x.device).unsqueeze(0)
+        valid = token_positions < lengths.unsqueeze(1)
+        x = x[valid]
 
         zerocheck = torch.logical_and(
             (x.max(dim=1).values == 0),
-            (x.min(dim=1).values
-             == 0))  # check that we don't have empty embeddings used
+            (x.min(dim=1).values == 0)
+        )
         assert zerocheck.int().sum() == 0
         xx = self.transformer(x, culen, mxlen)
-        # separate the flash attention cumulated output back to separate sequences
-        xxoutdim = xx.size()[-1]
-        x = torch.zeros(b, self.clsnum, xxoutdim).to(x.device)
-        for i in range(b):
-            x[i] = xx[culen[i]:culen[i] + self.clsnum]
+
+        # Gather classification tokens from each packed sequence in one op.
+        starts = culen[:-1].to(dtype=torch.long)
+        cls_offsets = starts.unsqueeze(1) + torch.arange(
+            self.clsnum, device=xx.device, dtype=torch.long
+        ).unsqueeze(0)
+        x = xx[cls_offsets]
 
         x = x.mean(dim=1) if self.pool == 'mean' else x[:, 0:self.clsnum]
 
@@ -338,23 +432,20 @@ class SerieTransformerEncoder(nn.Module):
             end=len(x)).to(occur46.device))
         lens = occur46[:, 1] + 1
         x = self.embed(x)
-        posenc = self.p_enc[0:x.size()[1]].to(x.device).repeat(len(x), 1, 1)
+        posenc = self.p_enc[0:x.size()[1]].to(
+            device=x.device, dtype=x.dtype
+        ).unsqueeze(0).expand(len(x), -1, -1)
         x = torch.cat([x, posenc], dim=2)
-        cl = torch.cumsum(lens, dim=0)  # cumulative sums of lengths
-        culen = torch.zeros(len(cl) + 1).long().to(cl.device)
-        culen[
-            1:] = cl  # cumulative sequence length used for flash attention input
-        mxlen = lens.max()
-        nx = torch.zeros(culen[-1].item(), self.embsize).to(x.device)
-        for i in range(
-                len(cl)
-        ):  # move each input sequence into the concatenated long sequence
-            assert lens[i] == culen[i + 1] - culen[i]
-            nx[culen[i]:culen[i + 1]] = x[i][0:lens[i]]
+
+        lengths = lens.to(device=x.device, dtype=torch.long)
+        cl = torch.cumsum(lengths, dim=0)
+        culen = torch.cat((cl.new_zeros(1), cl), dim=0)
+        mxlen = lengths.max()
+        token_positions = torch.arange(x.size(1), device=x.device).unsqueeze(0)
+        valid = token_positions < lengths.unsqueeze(1)
+        nx = x[valid]
         nx = self.transformer(nx, culen, mxlen)
-        xout = torch.stack([
-            nx[culen[i + 1] - 1] for i in range(len(lens))
-        ])  # obtain the last embedding for each text sequence
+        xout = nx[(culen[1:] - 1).to(dtype=torch.long)]
         if hasattr(self, 'prelinear') and self.prelinear:
             return xout
         return self.linear(xout)
@@ -434,19 +525,21 @@ class HierViT(nn.Module):
         if not hasattr(self.innerViT,"dim"):
             self.innerViT.dim = 289
 
-        # batch process serienamevecs
-        serienameencoded = torch.zeros(len(lens), len(lenss),
-                                       self.innerViT.dim).to(
-                                           self.dummy_param.device)
-        for j in range(len(lens)):
-            serienamevecs = xdict['serienames'][j][0:lens[j]]
-            serienameencoded[j][0:lens[j]] = self.serieencoder(serienamevecs)
+        # Batch-process series-name embeddings only when the checkpoint uses them.
+        serienameencoded = None
+        if self.useseriename:
+            serienameencoded = self.dummy_param.new_zeros(
+                (len(lens), len(lenss), self.innerViT.dim)
+            )
+            for j in range(len(lens)):
+                serienamevecs = xdict['serienames'][j][0:lens[j]]
+                serienameencoded[j][0:lens[j]] = self.serieencoder(serienamevecs)
 
         totalimgs = lens.sum(
         )  # totalimgs is total number of series over the batch
         imgmax = lenss.max()  # longest serie in batch
-        newx = torch.zeros(totalimgs, imgmax + extra, self.innerViT.dim).to(
-            mydevice
+        newx = self.dummy_param.new_zeros(
+            (int(totalimgs.item()), int(imgmax.item()) + extra, self.innerViT.dim)
         )  # the input to the innervit, where each series is treated as a separate sequence
 
         for i in range(len(x)):
@@ -467,7 +560,9 @@ class HierViT(nn.Module):
                         theserielastdim] = theserie  # leave extra space for serie encoding
                     counter += 1
                     slens.append(slen + extra)
-        slens = torch.LongTensor(slens).to(mydevice)
+        slens = torch.stack(slens).to(
+            device=mydevice, dtype=torch.long
+        )
 
         innerraw, outs = self.innerViT({
             'visual': newx,
@@ -478,12 +573,8 @@ class HierViT(nn.Module):
         extra = 0
         if self.usestudydescription:  # leave extra space for study description
             extra = 1
-        nextx = torch.zeros(
-            len(lens),
-            lens.max() + extra,
-            outs.size()[-1]
-        ).to(
-            mydevice
+        nextx = outs.new_zeros(
+            (len(lens), int(lens.max().item()) + extra, outs.size(-1))
         )  # the input to outervit, with size batch_size x max_num_series_per_study x emb_size
         if self.usestudydescription:
             nextx[:,
@@ -492,7 +583,7 @@ class HierViT(nn.Module):
         for pos, out in enumerate(outs):
             i, j = mapper[pos]
             nextx[j][i + extra] = out
-        lens += extra
+        outer_lens = lens + extra
         if self.patdis:
             m = []
             for pos in mapper:
@@ -502,24 +593,24 @@ class HierViT(nn.Module):
             m = torch.LongTensor(m).to(innerraw.device)
             return self.outerViT({
                 'visual': nextx,
-                'lens': lens.to(mydevice)
+                'lens': outer_lens.to(mydevice)
             },
                                  retpool=retpool), self.patdisnet(innerraw), m
         if hasattr(self, 'getserieemb') and self.getserieemb:
             return self.outerViT({
                 'visual': nextx,
-                'lens': lens.to(mydevice)
+                'lens': outer_lens.to(mydevice)
             },
                                  retpool=retpool), outs
         if hasattr(self, 'retboth') and self.retboth:
             return self.outerViT({
                 'visual': nextx,
-                'lens': lens.to(mydevice)
+                'lens': outer_lens.to(mydevice)
             },
                                  retboth=True)
         return self.outerViT({
             'visual': nextx,
-            'lens': lens.to(mydevice)
+            'lens': outer_lens.to(mydevice)
         },
                              retpool=retpool)
 
@@ -527,11 +618,13 @@ class HierViT(nn.Module):
     def make_no_flashattn(self) -> None:
         self.innerViT.make_no_flashattn()
         self.outerViT.make_no_flashattn()
-        try:
-            self.serieencoder.make_no_flashattn()
-        except:
-            self.serieencoder[0].make_no_flashattn()
-        self.studyencoder.make_no_flashattn()
+        if hasattr(self, 'serieencoder'):
+            try:
+                self.serieencoder.make_no_flashattn()
+            except (AttributeError, TypeError):
+                self.serieencoder[0].make_no_flashattn()
+        if hasattr(self, 'studyencoder'):
+            self.studyencoder.make_no_flashattn()
 
 
 # the clip objsctive
