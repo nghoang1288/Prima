@@ -16,9 +16,10 @@ low_vram: true
 visual_dtype: "float16"
 prune_inference_only: true
 
-# Only VQ-VAE encoder is needed by PRIMA. Keep decoder/codebook off GPU.
+# Reference tokenizer precision: upstream VQ-VAE inference is FP32.
+# Encoder-only placement + chunk backoff still minimizes 8 GB VRAM usage.
 tokenizer_encoder_only: true
-tokenizer_dtype: "float16"
+tokenizer_dtype: "float32"
 
 # Conservative tokenizer chunk for 8 GB Ada. Increase after measuring peak VRAM.
 max_tokens_per_chunk: 96
