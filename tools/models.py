@@ -335,7 +335,7 @@ class ModelLoader:
                         weights_only=True,
                         mmap=True,
                     )
-                except RuntimeError as exc:
+                except (RuntimeError, ValueError) as exc:
                     logging.warning(
                         "VQ-VAE checkpoint mmap unavailable (%s); retrying normally",
                         exc,
@@ -707,7 +707,7 @@ class ModelLoader:
                             pickle_module=_prima_pickle,
                             mmap=True,
                         )
-                    except RuntimeError as exc:
+                    except (RuntimeError, ValueError) as exc:
                         logging.warning(
                             "Full checkpoint mmap unavailable (%s); retrying normally",
                             exc,
