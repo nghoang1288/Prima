@@ -13,6 +13,7 @@ path intended for workstation GPUs (notably 8 GB Ada cards):
 """
 
 import argparse
+import contextlib
 import gc
 import json
 import logging
@@ -112,6 +113,19 @@ class PipelineConfig:
             raise ValueError(f"Unsupported tokenizer_dtype: {cfg.tokenizer_dtype}")
         if cfg.visual_dtype.lower() not in valid_dtypes:
             raise ValueError(f"Unsupported visual_dtype: {cfg.visual_dtype}")
+        device = torch.device(cfg.device)
+        if device.type == "cuda":
+            if not torch.cuda.is_available():
+                raise RuntimeError(
+                    "CUDA device requested but PyTorch cannot see CUDA. "
+                    "On Windows use WSL2 with a current NVIDIA Windows driver; "
+                    "do not install a Linux NVIDIA display driver inside WSL."
+                )
+            if device.index is not None and device.index >= torch.cuda.device_count():
+                raise ValueError(
+                    f"CUDA device index {device.index} is unavailable; "
+                    f"visible device count is {torch.cuda.device_count()}"
+                )
         return cfg
 
 
@@ -366,19 +380,19 @@ class Pipeline:
             )
             try:
                 with torch.inference_mode():
-                    if amp_enabled:
-                        with torch.amp.autocast(
+                    amp_dtype = self._dtype_from_name(
+                        self.config.tokenizer_dtype
+                    )
+                    amp_context = (
+                        torch.amp.autocast(
                             device_type="cuda",
-                            dtype=self._dtype_from_name(
-                                self.config.tokenizer_dtype
-                            ),
-                        ):
-                            emb = (
-                                vqvae(chunk)
-                                if self._tokenizer_encoder_only
-                                else vqvae.encode(chunk)
-                            )
-                    else:
+                            dtype=amp_dtype,
+                        )
+                        if amp_enabled
+                        and amp_dtype in (torch.float16, torch.bfloat16)
+                        else contextlib.nullcontext()
+                    )
+                    with amp_context:
                         emb = (
                             vqvae(chunk)
                             if self._tokenizer_encoder_only
@@ -690,10 +704,16 @@ class Pipeline:
         try:
             with torch.inference_mode():
                 if self._device().type == "cuda":
-                    with torch.amp.autocast(
-                        device_type="cuda",
-                        dtype=self._dtype_from_name(self.config.visual_dtype),
-                    ):
+                    amp_dtype = self._dtype_from_name(self.config.visual_dtype)
+                    amp_context = (
+                        torch.amp.autocast(
+                            device_type="cuda",
+                            dtype=amp_dtype,
+                        )
+                        if amp_dtype in (torch.float16, torch.bfloat16)
+                        else contextlib.nullcontext()
+                    )
+                    with amp_context:
                         predictions = model(
                             prima_input,
                             inference_only_once=True,
