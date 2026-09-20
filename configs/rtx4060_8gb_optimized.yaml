@@ -34,5 +34,6 @@ compile_visual: false
 compile_mode: "max-autotune-no-cudagraphs"
 
 otsu_percentage: 5
+prefilter_otsu_before_vq: true
 log_cuda_memory: true
 save_runtime_metrics: true
