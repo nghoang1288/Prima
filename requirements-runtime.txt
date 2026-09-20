@@ -1,0 +1,23 @@
+# Modern inference runtime (September 2026)
+# If your platform needs a specific CUDA wheel, install the matching PyTorch
+# build first using the official PyTorch selector, then install this file.
+torch==2.14.0
+monai==1.6.0
+torchao>=0.17,<0.19
+safetensors>=0.6,<1.0
+
+numpy>=1.26,<3
+scipy>=1.13,<2
+SimpleITK>=2.5,<2.6
+pydicom>=3.0,<4
+natsort>=8.4,<9
+tqdm>=4.67,<5
+pyyaml>=6.0,<7
+psutil>=7.0,<8
+einops>=0.8,<1
+positional-encodings>=6.0,<7
+perceiver-pytorch>=0.8,<1
+transformers>=4.49,<5
+
+# flash-attn is intentionally optional. PRIMA now prefers native PyTorch
+# variable-length attention and falls back to PyTorch SDPA automatically.
