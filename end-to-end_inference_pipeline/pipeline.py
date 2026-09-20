@@ -65,6 +65,7 @@ class PipelineConfig:
     low_vram: bool = False
     visual_dtype: str = "float16"
     quantize_cpu_heads: bool = False
+    head_quant_backend: str = "torch_dynamic"
     compile_visual: bool = False
     compile_mode: str = "default"
     attention_backend: str = "auto"
@@ -91,6 +92,10 @@ class PipelineConfig:
         if cfg.attention_backend not in {"auto", "native", "flash", "sdpa"}:
             raise ValueError(
                 "attention_backend must be one of: auto, native, flash, sdpa"
+            )
+        if cfg.head_quant_backend not in {"torch_dynamic", "torchao"}:
+            raise ValueError(
+                "head_quant_backend must be one of: torch_dynamic, torchao"
             )
         return cfg
 
@@ -290,6 +295,7 @@ class Pipeline:
             low_vram=self.config.low_vram,
             visual_dtype=self.config.visual_dtype,
             quantize_cpu_heads=self.config.quantize_cpu_heads,
+            head_quant_backend=self.config.head_quant_backend,
             compile_visual=self.config.compile_visual,
             compile_mode=self.config.compile_mode,
         )
