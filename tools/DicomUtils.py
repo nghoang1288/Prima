@@ -267,7 +267,7 @@ class DicomUtils:
         for series in series_list:
             series_path = os.path.join(study_dir, series)
             if not os.path.isdir(series_path):
-                logging.warning(f"Skipping {series}: not a directory")
+                logging.debug("Skipping non-directory study entry: %s", series)
                 continue
             try:
                 series_image, dicom_files, _ = DicomUtils.read_dicom_series(series_path)
