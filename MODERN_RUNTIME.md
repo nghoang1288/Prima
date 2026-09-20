@@ -270,3 +270,47 @@ Important decisions for the RTX 4060 target:
 For WSL2, `PYTORCH_ALLOC_CONF=expandable_segments:True` is worth an A/B test
 if allocator fragmentation is observed, but it is not hard-coded because the
 option remains experimental.
+
+
+## Windows / WSL2 RTX 4060 deployment
+
+For the first hardware validation, use WSL2 rather than Windows-native Python.
+
+- Keep the repo, model weights and staged DICOM under the Linux filesystem
+  (for example `~/src/Prima`), not under `/mnt/c`.
+- Install/update the NVIDIA display driver on Windows only. Do not install a
+  Linux NVIDIA display driver inside WSL.
+- PyTorch 2.14 PyPI Linux wheels use a CUDA 13.x runtime. For this release
+  candidate, use a current Windows NVIDIA driver with major version >= 580.
+- Run `python tools/preflight.py` before downloading/processing a study.
+- WSL2 defaults to 50% of Windows host RAM. The full PRIMA checkpoint can be
+  CPU-memory heavy, so on a host with >=32 GB RAM allocate roughly 75% to WSL
+  for validation and keep swap enabled. Do not attempt routine validation on a
+  host with <32 GB without reviewing checkpoint audit memory first.
+- The PyTorch wheel already supplies the CUDA runtime needed for inference.
+  Do not install a CUDA toolkit in WSL for the initial run; a toolkit is only
+  needed later if compiling optional CUDA extensions.
+
+### Official weights
+
+Install `gdown` separately, then force a fresh official download for the first
+validated deployment:
+
+```bash
+python tools/download_models_and_setup_test.py --force-download
+```
+
+The downloader writes `test/trained_models/model_manifest.json` containing
+file size and SHA256. The full model must be the priority-corrected checkpoint
+from 2026-02-19 or later.
+
+### Local data safety
+
+Use a de-identified staging case named with a neutral identifier such as
+`CASE001`. Never commit local DICOM paths, patient identifiers, output JSON, or
+runtime logs. Local deployment configs matching `configs/local_*.yaml` and
+`output/` are git-ignored.
+
+Do not connect this release candidate to PACS write-back or automated clinical
+reporting. Complete baseline/optimized equivalence review on representative
+de-identified cases first.
