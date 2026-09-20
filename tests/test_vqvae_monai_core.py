@@ -25,7 +25,9 @@ def test_monai_core_vqvae_accepts_published_prima_config_schema():
     x = torch.randn(2, 1, 8, 32, 32)
     with torch.inference_mode():
         encoded = model.encode(x)
+        direct_encoder = model.encoder(x)
 
     assert isinstance(encoded, torch.Tensor)
     assert encoded.shape[0] == 2
     assert encoded.ndim == 5
+    assert torch.equal(encoded, direct_encoder)
