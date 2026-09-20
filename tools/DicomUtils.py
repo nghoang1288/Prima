@@ -134,7 +134,11 @@ class DicomUtils:
 
             return combined_name
         except Exception as e:
-            logging.error(f"Error reading DICOM file {dicom_file_path}: {e}")
+            logging.error(
+                "Error reading DICOM metadata from file %s: %s",
+                Path(dicom_file_path).name,
+                e,
+            )
             return None
 
     @staticmethod
@@ -278,7 +282,7 @@ class DicomUtils:
                 logging.warning(f"Failed to load series {series}: {str(e)}. Skipping...")
                 continue
         if yielded == 0:
-            raise RuntimeError(f"No valid series found in {study_dir}")
+            raise RuntimeError("No valid series found in configured study directory")
 
     @staticmethod
     def load_mri_study(study_dir: str) -> Tuple[List[sitk.Image], List[str]]:
