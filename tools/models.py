@@ -663,6 +663,15 @@ class ModelLoader:
                 _saved_patchify = sys.modules.get("patchify")
                 # Custom unpickler: resolve 'model' and 'model_parts' to Prima_training_and_evaluation submodules on demand
                 def _prima_find_class(mod_name, name):
+                    if (
+                        name == "FullMRIModel"
+                        and mod_name in {
+                            "complete_visual_model",
+                            "full_model",
+                            "Prima_training_and_evaluation.full_model",
+                        }
+                    ):
+                        return FullMRIModel
                     if mod_name == "model":
                         import Prima_training_and_evaluation.model as _m
                         sys.modules["model"] = _m
