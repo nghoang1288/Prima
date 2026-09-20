@@ -47,13 +47,14 @@ def test_recursive_scan_groups_one_study_into_series(tmp_path):
     write_dicom(b / "3.dcm", study_uid, series_b)
     (tmp_path / "not_dicom.txt").write_text("ignore me")
 
-    groups, found_uid, description = scan(tmp_path)
+    groups, found_uid, description, skipped = scan(tmp_path)
 
     assert found_uid == study_uid
     assert description == "MRI BRAIN"
     assert set(groups) == {series_a, series_b}
     assert len(groups[series_a]) == 2
     assert len(groups[series_b]) == 1
+    assert skipped == {}
 
 
 def test_scan_rejects_mixed_studies(tmp_path):
@@ -64,3 +65,24 @@ def test_scan_rejects_mixed_studies(tmp_path):
 
     with pytest.raises(RuntimeError, match="exactly one StudyInstanceUID"):
         scan(folder)
+
+
+def test_scan_ignores_and_reports_non_mr_ancillary_objects(tmp_path):
+    study_uid = generate_uid()
+    mr_series = generate_uid()
+    folder = tmp_path / "export"
+    folder.mkdir()
+
+    write_dicom(folder / "mr.dcm", study_uid, mr_series)
+
+    sr_path = folder / "sr.dcm"
+    write_dicom(sr_path, study_uid, generate_uid())
+    ds = pydicom.dcmread(str(sr_path))
+    ds.Modality = "SR"
+    ds.save_as(str(sr_path), enforce_file_format=True)
+
+    groups, found_uid, _, skipped = scan(folder)
+
+    assert found_uid == study_uid
+    assert set(groups) == {mr_series}
+    assert skipped == {"SR": 1}
