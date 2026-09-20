@@ -9,6 +9,7 @@ numpy>=1.26,<3
 scipy>=1.13,<2
 SimpleITK>=2.5,<2.6
 pydicom>=3.0,<4
+nibabel>=5.3,<6
 natsort>=8.4,<9
 tqdm>=4.67,<5
 pyyaml>=6.0,<7
