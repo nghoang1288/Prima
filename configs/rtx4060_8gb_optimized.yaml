@@ -19,6 +19,8 @@ prune_inference_only: true
 tokenizer_encoder_only: true
 tokenizer_dtype: "float16"
 max_tokens_per_chunk: 96
+min_tokens_per_chunk: 16
+auto_reduce_tokenizer_chunk: true
 attention_backend: "auto"
 
 # Biggest RAM optimization. For CPU heads, PyTorch dynamic INT8 is the
