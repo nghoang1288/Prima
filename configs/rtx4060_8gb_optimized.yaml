@@ -18,6 +18,7 @@ fail_on_series_error: true
 low_vram: true
 visual_dtype: "float16"
 prune_inference_only: true
+release_cpu_token_state_before_prima: true
 
 # Keep VQ-VAE encoder FP32 by default to match upstream tokenizer precision.
 # Encoder-only placement, pre-VQ filtering and chunk backoff provide the 8 GB savings.
