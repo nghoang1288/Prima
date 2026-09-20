@@ -90,3 +90,30 @@ def test_scan_ignores_and_reports_non_mr_ancillary_objects(tmp_path):
     assert found_uid == study_uid
     assert set(groups) == {mr_series}
     assert skipped == {"SR": 1}
+
+
+def test_scan_ignores_and_reports_secondary_capture_and_pdf_with_mr_modality(tmp_path):
+    study_uid = generate_uid()
+    mr_series = generate_uid()
+    folder = tmp_path / "export"
+    folder.mkdir()
+
+    write_dicom(folder / "mr.dcm", study_uid, mr_series)
+
+    sc_path = folder / "sc.dcm"
+    write_dicom(sc_path, study_uid, generate_uid())
+    ds_sc = pydicom.dcmread(str(sc_path))
+    ds_sc.SOPClassUID = "1.2.840.10008.5.1.4.1.1.7"
+    ds_sc.save_as(str(sc_path), enforce_file_format=True)
+
+    pdf_path = folder / "pdf.dcm"
+    write_dicom(pdf_path, study_uid, generate_uid())
+    ds_pdf = pydicom.dcmread(str(pdf_path))
+    ds_pdf.SOPClassUID = "1.2.840.10008.5.1.4.1.1.104.1"
+    ds_pdf.save_as(str(pdf_path), enforce_file_format=True)
+
+    groups, found_uid, _, skipped, _ = scan(folder)
+
+    assert found_uid == study_uid
+    assert set(groups) == {mr_series}
+    assert skipped == {"SC": 1, "DOC": 1}
