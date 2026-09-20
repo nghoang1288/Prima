@@ -8,7 +8,7 @@ def sample_predictions():
     return {
         "diagnosis": {
             "tumor_adult_glioma": [0.42],
-            "intracranial_hemorrhage": [-0.10],
+            "vascular_hemorrhagic_intracranial_hemorrhage": [-0.10],
             "far_negative": [-2.0],
         },
         "referral": {
