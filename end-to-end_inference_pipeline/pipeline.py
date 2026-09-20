@@ -180,15 +180,15 @@ class Pipeline:
 
     def _release_tokenizer(self) -> None:
         if self.tokenizer_model is not None:
-            try:
-                self.tokenizer_model.cpu()
-            except Exception:
-                pass
+            # The tokenizer is never reused after tokenization, so copying its
+            # weights back to CPU before deletion only adds D2H traffic and a
+            # transient RAM allocation.
             del self.tokenizer_model
             self.tokenizer_model = None
+            self._tokenizer_encoder_only = False
+        gc.collect()
         if torch.cuda.is_available():
             torch.cuda.empty_cache()
-        gc.collect()
 
     def _cleanup(self) -> None:
         self.logger.info("Cleaning up resources...")
