@@ -17,3 +17,5 @@ configs/local_*.json
 docs/deployment/
 *_predictions.json
 *_comparison.json
+*_report.md
+*_report.html
