@@ -39,6 +39,7 @@ from Prima_training_and_evaluation.patchify import MedicalImagePatchifier
 from tools.DicomUtils import DicomUtils
 from tools.models import ModelLoader
 from tools.mrcommondataset import MrVoxelDataset
+from tools.render_report import render_reports
 from tools.utilities import chartovec, filtercoords, select_otsu_indices
 
 
@@ -84,6 +85,10 @@ class PipelineConfig:
     prefilter_otsu_before_vq: bool = False
     log_cuda_memory: bool = True
     save_runtime_metrics: bool = True
+    render_human_report: bool = True
+    report_language: str = "vi"
+    report_near_margin: float = 0.25
+    report_show_all_scores: bool = False
 
     @classmethod
     def from_dict(cls, config_dict: Dict[str, Any]) -> "PipelineConfig":
@@ -119,6 +124,10 @@ class PipelineConfig:
             raise ValueError(f"Unsupported tokenizer_dtype: {cfg.tokenizer_dtype}")
         if cfg.visual_dtype.lower() not in valid_dtypes:
             raise ValueError(f"Unsupported visual_dtype: {cfg.visual_dtype}")
+        if cfg.report_language not in {"vi", "en"}:
+            raise ValueError("report_language must be one of: vi, en")
+        if cfg.report_near_margin < 0:
+            raise ValueError("report_near_margin must be >= 0")
         device = torch.device(cfg.device)
         if device.type == "cuda":
             if not torch.cuda.is_available():
@@ -889,6 +898,32 @@ class Pipeline:
                 all_ser_emb_meta=meta,
             )
             self._stage_done("total", total_started)
+
+            if self.config.render_human_report:
+                try:
+                    md_path, html_path = render_reports(
+                        self._serializable(predictions),
+                        study_id=self.study_id,
+                        output_dir=self.output_dir,
+                        metrics=self.metrics,
+                        language=self.config.report_language,
+                        near_margin=self.config.report_near_margin,
+                        show_all_scores=self.config.report_show_all_scores,
+                    )
+                    self.logger.info(
+                        "Human-readable reports saved to %s and %s",
+                        md_path,
+                        html_path,
+                    )
+                except Exception:
+                    # Presentation must never destroy an otherwise valid raw
+                    # model output. Keep JSON authoritative and surface the
+                    # rendering failure clearly in the log.
+                    self.logger.exception(
+                        "Failed to render human-readable report; "
+                        "raw prediction JSON remains available"
+                    )
+
             return predictions
         finally:
             self.save_metrics()
