@@ -14,6 +14,7 @@ device: "cuda"
 stream_dicom: true
 low_vram: true
 visual_dtype: "float16"
+prune_inference_only: true
 
 # Only VQ-VAE encoder is needed by PRIMA. Keep decoder/codebook off GPU.
 tokenizer_encoder_only: true
