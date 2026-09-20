@@ -1,0 +1,53 @@
+{
+  "schema_version": 1,
+  "task_id": "PRIMA-20260920-003",
+  "created_at": "2026-09-20T23:59:30+07:00",
+  "target_agent": "antigravity",
+  "status": "pending",
+  "supersedes": null,
+  "code": {
+    "branch": "modern-runtime",
+    "base_sha": "99cd62ccfadccb6c6e52a9f09977eb9f1f3391cf"
+  },
+  "execution": {
+    "mode": "execute",
+    "requires_user_approval": false,
+    "local_aliases_only": true,
+    "instructions": [
+      "Read ANTIGRAVITY_BRIDGE.md from origin/agent-control before execution.",
+      "Fetch origin/modern-runtime and verify exact code.base_sha.",
+      "Run tests/test_render_report.py on the exact SHA.",
+      "Do NOT rerun MRI inference for this task.",
+      "Reuse the existing local CASE001_predictions.json and runtime_metrics.json produced by task PRIMA-20260920-002.",
+      "Render CASE001_report.md and CASE001_report.html again using the updated radiologist-first renderer.",
+      "Verify the default report contains Vietnamese sections: Đọc nhanh; Các nhãn PRIMA vượt ngưỡng; Các nhãn sát ngưỡng when applicable; Gợi ý hội chẩn / chuyên khoa; Giới hạn cần nhớ khi đọc kết quả.",
+      "Verify default report hides raw model codes and margins, while raw JSON remains untouched.",
+      "Do not upload, commit, screenshot, or quote patient-derived report contents to GitHub.",
+      "Push only non-PHI pass/fail checks to the task result."
+    ],
+    "commands": [
+      "git fetch origin modern-runtime agent-control",
+      "git rev-parse origin/modern-runtime",
+      "python -m pytest -q tests/test_render_report.py",
+      "python tools/render_report.py <LOCAL_CASE001_PREDICTIONS_JSON> --metrics <LOCAL_CASE001_RUNTIME_METRICS_JSON> --study-id CASE001 --language vi"
+    ]
+  },
+  "safety": {
+    "allow_patient_data_read_local": true,
+    "allow_patient_derived_output_on_github": false,
+    "allow_destructive_workspace_ops": false,
+    "allow_merge": false,
+    "allow_force_push_code": false
+  },
+  "acceptance": [
+    "origin/modern-runtime equals 99cd62ccfadccb6c6e52a9f09977eb9f1f3391cf",
+    "tests/test_render_report.py passes",
+    "Existing CASE001 raw prediction JSON is not modified",
+    "CASE001_report.md is regenerated locally",
+    "CASE001_report.html is regenerated locally",
+    "Default human-readable report is radiologist-first and hides raw model codes/margins",
+    "No patient-derived report content is pushed to GitHub",
+    "A terminal result is pushed to .antigravity/results/PRIMA-20260920-003.json"
+  ],
+  "result_path": ".antigravity/results/PRIMA-20260920-003.json"
+}
