@@ -7,6 +7,7 @@ output_dir: "output/4060-baseline"
 study_description: "MRI BRAIN WO AND W CONTRAST"
 study_id: "CASE001"
 redact_source_path: true
+redact_series_names: true
 
 tokenizer_model_config: "configs/sample_tokenizer_config.json"
 prima_model_config: "configs/sample_prima_config.json"
