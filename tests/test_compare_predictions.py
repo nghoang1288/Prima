@@ -21,3 +21,13 @@ def test_priority_rows_do_not_report_zero_sign_flip():
     assert flips == 0
     assert "sign_flip_at_zero" not in rows["none"]
     assert scalar([1.5]) == 1.5
+
+
+def test_compare_group_marks_missing_outputs():
+    rows, flips = compare_group(
+        {"a": [0.2], "missing": [0.1]},
+        {"a": [0.3]},
+        track_zero_flip=True,
+    )
+    assert flips == 0
+    assert rows["missing"] == {"missing": True}
