@@ -63,6 +63,7 @@ device: "cuda"
 low_vram: true
 visual_dtype: "float16"
 log_cuda_memory: true
+disable_flash_attention: false
 max_tokens_per_chunk: 128
 ```
 
@@ -88,6 +89,8 @@ CUDA memory [PRIMA inference complete]: ...
 ```
 
 Those values are the quickest way to determine whether the visual backbone itself fits a specific GPU.
+
+For low-VRAM mode, keep `disable_flash_attention: false`. PRIMA will use FlashAttention when available and automatically fall back to the repository's non-flash implementation when it is unavailable.
 
 ### Notes
 
