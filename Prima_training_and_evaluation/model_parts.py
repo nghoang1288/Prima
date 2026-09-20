@@ -134,6 +134,10 @@ class Attention(nn.Module):
         max_len = int(mxlen.item()) if isinstance(mxlen, torch.Tensor) else int(mxlen)
         dropout_p = self.dropoutp if self.training else 0.0
         backend = self._backend()
+        # Native varlen currently has no dropout_p argument. Preserve training
+        # semantics by using flash-attn/SDPA when attention dropout is active.
+        if backend == 'native' and self.training and dropout_p > 0:
+            backend = 'flash' if flash_attn_varlen_qkvpacked_func is not None else 'sdpa'
 
         if backend == 'native':
             if torch_varlen_attn is None:
