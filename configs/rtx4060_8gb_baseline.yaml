@@ -19,6 +19,7 @@ fail_on_series_error: true
 low_vram: true
 visual_dtype: "float16"
 prune_inference_only: true
+release_cpu_token_state_before_prima: true
 
 # Reference tokenizer precision: upstream VQ-VAE inference is FP32.
 # Encoder-only placement + chunk backoff still minimizes 8 GB VRAM usage.
