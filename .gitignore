@@ -13,3 +13,4 @@ configs/local_*.yaml
 *.IMA
 *.dicom
 *.DICOM
+configs/local_*.json
