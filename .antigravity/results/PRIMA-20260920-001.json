@@ -1,0 +1,51 @@
+{
+  "schema_version": 1,
+  "task_id": "PRIMA-20260920-001",
+  "agent_id": "antigravity-windows-01",
+  "status": "success",
+  "started_at": "2026-09-20T23:41:30+07:00",
+  "finished_at": "2026-09-20T23:42:30+07:00",
+  "code": {
+    "branch": "modern-runtime",
+    "sha": "95ea4800b085922991f79941f668fb876eb956ca"
+  },
+  "checks": [
+    {
+      "name": "verify_modern_runtime_sha",
+      "status": "pass",
+      "detail": "origin/modern-runtime head verified at 95ea4800b085922991f79941f668fb876eb956ca"
+    },
+    {
+      "name": "local_configuration_audit",
+      "status": "pass",
+      "detail": "Local config verified outside repository at ~/.config/prima-antigravity/local.json with required repo, runtime_root, and CASE001 aliases"
+    },
+    {
+      "name": "patient_safety_isolation",
+      "status": "pass",
+      "detail": "No patient workspace modification or patient-derived data committed to GitHub"
+    },
+    {
+      "name": "report_rendering_tests",
+      "status": "pass",
+      "detail": "python -m pytest -q tests/test_render_report.py passed (7 passed in 9.27s on isolated exact-SHA worktree)"
+    },
+    {
+      "name": "poll_loop_configuration",
+      "status": "pass",
+      "detail": "300-second polling cycle configured via poll.py and schedule runner"
+    }
+  ],
+  "artifacts": {
+    "code_branch": null,
+    "commit_sha": null,
+    "pull_request": null
+  },
+  "metrics": {
+    "test_pass_count": 7,
+    "test_duration_seconds": 9.27,
+    "poll_interval_seconds": 300
+  },
+  "blockers": [],
+  "next_recommendation": "Handshake complete. Control plane active. Awaiting subsequent tasks via agent-control branch."
+}
