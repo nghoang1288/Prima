@@ -1,0 +1,46 @@
+{
+  "schema_version": 1,
+  "task_id": "PRIMA-20260920-001",
+  "created_at": "2026-09-20T23:55:00+07:00",
+  "target_agent": "antigravity",
+  "status": "pending",
+  "supersedes": null,
+  "code": {
+    "branch": "modern-runtime",
+    "base_sha": "95ea4800b085922991f79941f668fb876eb956ca"
+  },
+  "execution": {
+    "mode": "inspect",
+    "requires_user_approval": false,
+    "local_aliases_only": true,
+    "instructions": [
+      "Read ANTIGRAVITY_BRIDGE.md from origin/agent-control and adopt it as the polling/execution contract.",
+      "Verify local-only configuration exists outside the Git repository and provides PRIMA_REPO and PRIMA_RUNTIME_ROOT aliases. Do not print any patient source path.",
+      "Fetch origin/modern-runtime and verify its head equals code.base_sha.",
+      "Do not modify the patient workspace and do not run patient inference in this handshake task.",
+      "Run the focused non-PHI report test tests/test_render_report.py against the exact code.base_sha using an isolated worktree or already-clean exact-SHA checkout.",
+      "Write a non-PHI result JSON to result_path. Include exact SHA, test outcome, agent identifier, and whether the 5-minute poll loop is configured.",
+      "If any prerequisite is missing, return status=blocked with a concise non-PHI blocker instead of improvising."
+    ],
+    "commands": [
+      "git fetch origin modern-runtime agent-control",
+      "git rev-parse origin/modern-runtime",
+      "python -m pytest -q tests/test_render_report.py"
+    ]
+  },
+  "safety": {
+    "allow_patient_data_read_local": false,
+    "allow_patient_derived_output_on_github": false,
+    "allow_destructive_workspace_ops": false,
+    "allow_merge": false,
+    "allow_force_push_code": false
+  },
+  "acceptance": [
+    "origin/modern-runtime equals 95ea4800b085922991f79941f668fb876eb956ca",
+    "tests/test_render_report.py passes",
+    "No PHI or patient-derived prediction content is written to GitHub",
+    "A terminal result JSON is pushed to .antigravity/results/PRIMA-20260920-001.json",
+    "The local Antigravity poll interval is configured to 300 seconds"
+  ],
+  "result_path": ".antigravity/results/PRIMA-20260920-001.json"
+}
