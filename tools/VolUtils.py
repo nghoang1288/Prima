@@ -234,8 +234,13 @@ def resize_tokens_batch(tensor_list: List[torch.Tensor], patch_shape: List[int])
     """
     try:
         resize = Resize(spatial_size=patch_shape)
-        batch_tensor = np.stack(tensor_list)  # Stack tensors to create a batch
+        batch_tensor = torch.stack(
+            [torch.as_tensor(t, dtype=torch.float32) for t in tensor_list],
+            dim=0,
+        )
         resized_batch = resize(batch_tensor)
-        return list(resized_batch)
+        if isinstance(resized_batch, np.ndarray):
+            resized_batch = torch.from_numpy(resized_batch)
+        return list(resized_batch.unbind(0))
     except Exception as e:
         raise RuntimeError(f"Failed to resize tokens batch: {str(e)}")
