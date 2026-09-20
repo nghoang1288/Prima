@@ -62,6 +62,9 @@ class PipelineConfig:
     num_workers: int = 2
     max_tokens_per_chunk: int = 400
     device: str = "cuda" if torch.cuda.is_available() else "cpu"
+    low_vram: bool = False
+    visual_dtype: str = "float16"
+    log_cuda_memory: bool = True
 
     @classmethod
     def from_dict(cls, config_dict: Dict[str, Any]) -> 'PipelineConfig':
@@ -106,6 +109,21 @@ class Pipeline:
             ]
         )
         self.logger = logging.getLogger(__name__)
+
+    def _log_cuda_memory(self, label: str) -> None:
+        """Log current and peak CUDA allocator usage for low-VRAM tuning."""
+        if not self.config.log_cuda_memory or not torch.cuda.is_available():
+            return
+        dev = torch.device(self.config.device)
+        if dev.type != "cuda":
+            return
+        allocated = torch.cuda.memory_allocated(dev) / (1024 ** 3)
+        reserved = torch.cuda.memory_reserved(dev) / (1024 ** 3)
+        peak = torch.cuda.max_memory_allocated(dev) / (1024 ** 3)
+        self.logger.info(
+            "CUDA memory [%s]: allocated=%.2f GiB reserved=%.2f GiB peak=%.2f GiB",
+            label, allocated, reserved, peak,
+        )
 
     def _cleanup(self) -> None:
         """Clean up resources."""
@@ -173,9 +191,18 @@ class Pipeline:
                             prima_config = {**prima_config, "full_model_ckpt": str(config_dir / p)}
                 else:
                     prima_config = self.config.prima_model_config
-                self.prima_model = ModelLoader.load_full_prima_model(prima_config)
-                self.prima_model = self.prima_model.to(self.config.device)
+                self.prima_model = ModelLoader.load_full_prima_model(
+                    prima_config,
+                    device=self.config.device,
+                    low_vram=self.config.low_vram,
+                    visual_dtype=self.config.visual_dtype,
+                )
+                # In low-VRAM mode the full model intentionally remains on CPU;
+                # only clipvisualmodel is placed on CUDA by ModelLoader.
+                if not self.config.low_vram:
+                    self.prima_model = self.prima_model.to(self.config.device)
                 self.prima_model.eval()
+                self._log_cuda_memory("after PRIMA load")
             except Exception as e:
                 self.logger.error(f'Failed to load Prima model: {str(e)}')
                 raise
@@ -310,7 +337,10 @@ class Pipeline:
             (series_embeddings, series_names_for_embeddings). If series_names was not provided, second is None.
         """
         self.logger.info('Running tokenizer model')
+        if torch.cuda.is_available() and "cuda" in str(self.config.device):
+            torch.cuda.reset_peak_memory_stats(torch.device(self.config.device))
         vqvae = self.load_tokenizer_model()
+        self._log_cuda_memory("VQ-VAE loaded")
         dataloader = self.create_dataset(mri_study)
         series_embeddings = []
         filtered_names = [] if series_names is not None else None
@@ -361,9 +391,18 @@ class Pipeline:
             )
             return series_embeddings, (filtered_names if series_names is not None else None), all_ser_emb_meta
         finally:
-            self.tokenizer_model = None
-            torch.cuda.empty_cache()
+            self._log_cuda_memory("VQ-VAE finished")
+            if self.tokenizer_model is not None:
+                try:
+                    self.tokenizer_model.cpu()
+                except Exception:
+                    pass
+                del self.tokenizer_model
+                self.tokenizer_model = None
+            if torch.cuda.is_available():
+                torch.cuda.empty_cache()
             gc.collect()
+            self._log_cuda_memory("VQ-VAE unloaded")
 
     def run_prima_model(
         self,
@@ -412,8 +451,11 @@ class Pipeline:
             prima_input = move_to_device(prima_input, self.config.device)
 
             # Load model if not already loaded
+            if torch.cuda.is_available() and "cuda" in str(self.config.device):
+                torch.cuda.reset_peak_memory_stats(torch.device(self.config.device))
             if self.prima_model is None:
                 self.prima_model = self.load_full_prima_model()
+            self._log_cuda_memory("PRIMA ready")
             if hasattr(self.prima_model, 'make_no_flashattn'):
                 self.prima_model.make_no_flashattn()
 
@@ -422,14 +464,21 @@ class Pipeline:
             with torch.no_grad():
                 if device_type == 'cuda':
                     with torch.amp.autocast(device_type='cuda', dtype=torch.float16):
-                        predictions = self.prima_model(prima_input, inference_only_once = True)
+                        predictions = self.prima_model(
+                            prima_input,
+                            inference_only_once=True,
+                            heads_on_cpu=self.config.low_vram,
+                        )
                 else:
                     predictions = self.prima_model(prima_input)
+
+            self._log_cuda_memory("PRIMA inference complete")
 
             # Free input from GPU before serialization
             del prima_input
             if 'cuda' in str(self.config.device):
                 torch.cuda.empty_cache()
+            self._log_cuda_memory("PRIMA input released")
 
             # Convert tensors to lists for JSON serialization
             def tensor_to_serializable(obj):
