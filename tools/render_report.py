@@ -14,7 +14,7 @@ from typing import Any, Dict, List, Optional, Tuple
 PRIORITY_VI = {"high": "Ưu tiên cao", "low": "Ưu tiên thấp", "none": "Không ưu tiên"}
 PRIORITY_EN = {"high": "High priority", "low": "Low priority", "none": "No priority"}
 
-LABELS_VI = {
+DIAGNOSIS_LABELS_VI = {
     "cyst_arachnoid_cyst": "Nang màng nhện",
     "cyst_colloid_cyst": "Nang keo",
     "developmental_dandy_walker_malformation": "Dị dạng Dandy-Walker",
@@ -69,6 +69,24 @@ LABELS_VI = {
     "ventricular_ventriculomegaly": "Giãn não thất",
 }
 
+REFERRAL_LABELS_VI = {
+    "ns-pediatric": "Ngoại thần kinh nhi",
+    "ns-skull base": "Ngoại thần kinh nền sọ",
+    "ns-general": "Ngoại thần kinh tổng quát",
+    "ns-trauma": "Ngoại thần kinh chấn thương",
+    "ns-tumor": "Ngoại thần kinh u não",
+    "ns-vascular": "Ngoại thần kinh mạch máu",
+    "nl-pediatric": "Thần kinh nhi",
+    "nl-epilepsy": "Thần kinh động kinh",
+    "nl-neurocritical": "Hồi sức thần kinh",
+    "nl-neuroimmunology": "Thần kinh miễn dịch",
+    "nl-neurocognitive": "Thần kinh nhận thức",
+    "nl-oncology": "Ung bướu thần kinh",
+    "nl-trauma": "Thần kinh — chấn thương",
+    "nl-stroke": "Thần kinh đột quỵ",
+    "nl-general": "Thần kinh tổng quát",
+}
+
 
 def scalar(value: Any) -> float:
     if isinstance(value, (int, float)):
@@ -100,11 +118,10 @@ def humanize_code(code: str) -> str:
 def label_for(code: str, language: str) -> str:
     normalized = normalize_code(code)
     if language == "vi":
-        if normalized in LABELS_VI:
-            return LABELS_VI[normalized]
-        for key, translated in LABELS_VI.items():
-            if normalized.endswith("_" + key):
-                return translated
+        if code in REFERRAL_LABELS_VI:
+            return REFERRAL_LABELS_VI[code]
+        if normalized in DIAGNOSIS_LABELS_VI:
+            return DIAGNOSIS_LABELS_VI[normalized]
     return humanize_code(code)
 
 
