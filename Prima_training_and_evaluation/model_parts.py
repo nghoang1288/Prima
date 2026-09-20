@@ -190,15 +190,20 @@ class Attention(nn.Module):
         if backend == 'sdpa':
             out = sdpa_varlen(qkv, cu, dropout_p=dropout_p, causal=self.causal)
 
-        report_key = (backend, str(x.device), str(x.dtype))
-        if report_key not in _REPORTED_ATTENTION_BACKENDS:
-            _REPORTED_ATTENTION_BACKENDS.add(report_key)
-            logging.info(
-                "PRIMA attention backend: %s device=%s dtype=%s",
-                backend,
-                x.device,
-                x.dtype,
-            )
+        is_compiling = (
+            hasattr(torch, "compiler")
+            and torch.compiler.is_compiling()
+        )
+        if not is_compiling:
+            report_key = (backend, str(x.device), str(x.dtype))
+            if report_key not in _REPORTED_ATTENTION_BACKENDS:
+                _REPORTED_ATTENTION_BACKENDS.add(report_key)
+                logging.info(
+                    "PRIMA attention backend: %s device=%s dtype=%s",
+                    backend,
+                    x.device,
+                    x.dtype,
+                )
 
         out = out.flatten(start_dim=1)
         assert out.ndim == 2
