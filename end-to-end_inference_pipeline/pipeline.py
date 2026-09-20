@@ -66,6 +66,7 @@ class PipelineConfig:
     visual_dtype: str = "float16"
     quantize_cpu_heads: bool = False
     head_quant_backend: str = "torch_dynamic"
+    prune_inference_only: bool = True
     compile_visual: bool = False
     compile_mode: str = "default"
     attention_backend: str = "auto"
@@ -296,6 +297,7 @@ class Pipeline:
             visual_dtype=self.config.visual_dtype,
             quantize_cpu_heads=self.config.quantize_cpu_heads,
             head_quant_backend=self.config.head_quant_backend,
+            prune_inference_only=self.config.prune_inference_only,
             compile_visual=self.config.compile_visual,
             compile_mode=self.config.compile_mode,
         )
