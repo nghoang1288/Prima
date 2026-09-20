@@ -1,0 +1,34 @@
+{
+  "schema_version": 1,
+  "task_id": "PRIMA-YYYYMMDD-NNN",
+  "created_at": "RFC3339 timestamp",
+  "target_agent": "antigravity",
+  "status": "pending",
+  "supersedes": null,
+  "code": {
+    "branch": "modern-runtime",
+    "base_sha": "40-char commit SHA"
+  },
+  "execution": {
+    "mode": "inspect|execute|code_change",
+    "requires_user_approval": false,
+    "local_aliases_only": true,
+    "instructions": [
+      "Concrete, ordered instructions"
+    ],
+    "commands": [
+      "Optional shell commands using local aliases only"
+    ]
+  },
+  "safety": {
+    "allow_patient_data_read_local": false,
+    "allow_patient_derived_output_on_github": false,
+    "allow_destructive_workspace_ops": false,
+    "allow_merge": false,
+    "allow_force_push_code": false
+  },
+  "acceptance": [
+    "Objective checks that define success"
+  ],
+  "result_path": ".antigravity/results/PRIMA-YYYYMMDD-NNN.json"
+}
