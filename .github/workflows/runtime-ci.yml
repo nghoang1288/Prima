@@ -1,10 +1,9 @@
 name: Modern runtime CI
 
 on:
-  push:
-    branches: [modern-runtime]
   pull_request:
     branches: [main]
+  workflow_dispatch:
 
 jobs:
   runtime-tests:
