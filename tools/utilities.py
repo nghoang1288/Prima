@@ -47,15 +47,12 @@ def select_otsu_indices(meta, total_count, start_percentage=5, min_count=25):
     return chosen
 
 
-def chartovec(s: str) -> torch.Tensor:
-    """Convert a string to a tensor of character indices.
-    
-    Args:
-        s: Input string to convert
-        
-    Returns:
-        Tensor of character indices, with unknown characters mapped to index 45
-        and an end token (46) appended
+def chartovec(s: str, max_length=None) -> torch.Tensor:
+    """Convert a string to character indices with an explicit end token.
+
+    max_length is optional so historical training callers retain their
+    existing behavior. The inference runtime passes 200, matching the fixed
+    positional-encoding length of SerieTransformerEncoder.
     """
     ret = []
     for c in s.lower():
@@ -63,6 +60,12 @@ def chartovec(s: str) -> torch.Tensor:
             ret.append(CHAR_TO_INDEX[c] + 1)
         except KeyError:
             ret.append(45)  # Unknown character index
+
+    if max_length is not None:
+        if max_length < 1:
+            raise ValueError("max_length must be >= 1")
+        ret = ret[: max_length - 1]
+
     ret.append(46)  # End token
     return torch.LongTensor(ret)
 
