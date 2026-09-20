@@ -495,22 +495,12 @@ class Pipeline:
         ).unsqueeze(0)
 
         patched = self.patchifier(series_embeddings, coords=coords)
-        max_len = int(serie_lenss.max().item())
-        visuals: List[torch.Tensor] = []
-        for img in patched:
-            pad_len = max_len - len(img)
-            if pad_len:
-                img = torch.cat(
-                    [
-                        img,
-                        torch.zeros(
-                            (pad_len, *img.shape[1:]),
-                            dtype=img.dtype,
-                        ),
-                    ],
-                    dim=0,
-                )
-            visuals.append(img.unsqueeze(0))
+        # Keep each series ragged. HierViT already receives the true per-series
+        # lengths and performs its own packing, so padding every series to the
+        # study maximum here only duplicates VRAM before the inner transformer.
+        visuals: List[torch.Tensor] = [
+            img.unsqueeze(0) for img in patched
+        ]
 
         series_name_tensors = [chartovec(name) for name in series_names]
         max_name_len = max(len(t) for t in series_name_tensors)
