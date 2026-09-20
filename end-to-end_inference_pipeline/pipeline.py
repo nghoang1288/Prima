@@ -115,9 +115,15 @@ class Pipeline:
             "cuda_available": torch.cuda.is_available(),
         }
         if torch.cuda.is_available():
-            self.metrics["gpu_name"] = torch.cuda.get_device_name(
-                torch.device(self.config.device)
-            )
+            dev = torch.device(self.config.device)
+            self.metrics["gpu_name"] = torch.cuda.get_device_name(dev)
+            total_vram_gib = torch.cuda.get_device_properties(dev).total_memory / (1024**3)
+            self.metrics["gpu_total_vram_gib"] = total_vram_gib
+            if total_vram_gib <= 9.0 and not self.config.low_vram:
+                self.logger.warning(
+                    "GPU has %.1f GiB VRAM but low_vram=false; enable low_vram for 8 GB-class cards",
+                    total_vram_gib,
+                )
 
     def _setup_logging(self) -> None:
         log_file = self.output_dir / "pipeline.log"
@@ -494,15 +500,19 @@ class Pipeline:
         self.logger.info("Running PRIMA visual encoder + task heads")
         self._release_tokenizer()
         self._reset_cuda_peak()
-        started = time.perf_counter()
 
+        prep_started = time.perf_counter()
         prima_input = self.prepare_prima_input(
             series_embeddings=series_embeddings,
             series_names=series_names,
             all_ser_emb_meta=all_ser_emb_meta,
         )
         prima_input = self._move_to_device(prima_input, self._device())
+        self._stage_done("prepare_prima_input", prep_started)
+
         model = self.load_full_prima_model()
+        self._reset_cuda_peak()
+        inference_started = time.perf_counter()
 
         try:
             with torch.inference_mode():
@@ -522,7 +532,7 @@ class Pipeline:
                         heads_on_cpu=False,
                     )
 
-            self._stage_done("prima_inference", started)
+            self._stage_done("prima_inference", inference_started)
             self._log_memory("PRIMA inference complete")
 
             study_id = Path(self.config.study_dir).name or "study"
