@@ -57,6 +57,8 @@ class PipelineConfig:
     batch_size: int = 1
     num_workers: int = 0
     max_tokens_per_chunk: int = 128
+    min_tokens_per_chunk: int = 16
+    auto_reduce_tokenizer_chunk: bool = True
     device: str = "cuda" if torch.cuda.is_available() else "cpu"
 
     tokenizer_encoder_only: bool = True
@@ -316,30 +318,64 @@ class Pipeline:
 
         embeddings: List[torch.Tensor] = []
         amp_enabled = self._device().type == "cuda"
-        for start in range(0, tokens.shape[0], self.config.max_tokens_per_chunk):
-            stop = min(start + self.config.max_tokens_per_chunk, tokens.shape[0])
-            chunk = tokens[start:stop].unsqueeze(1).to(
+        chunk_size = min(self.config.max_tokens_per_chunk, int(tokens.shape[0]))
+        cursor = 0
+
+        while cursor < tokens.shape[0]:
+            stop = min(cursor + chunk_size, tokens.shape[0])
+            chunk = tokens[cursor:stop].unsqueeze(1).to(
                 self._device(), non_blocking=True
             )
-            with torch.inference_mode():
-                if amp_enabled:
-                    with torch.amp.autocast(
-                        device_type="cuda",
-                        dtype=self._dtype_from_name(self.config.tokenizer_dtype),
-                    ):
+            try:
+                with torch.inference_mode():
+                    if amp_enabled:
+                        with torch.amp.autocast(
+                            device_type="cuda",
+                            dtype=self._dtype_from_name(
+                                self.config.tokenizer_dtype
+                            ),
+                        ):
+                            emb = (
+                                vqvae(chunk)
+                                if self._tokenizer_encoder_only
+                                else vqvae.encode(chunk)
+                            )
+                    else:
                         emb = (
                             vqvae(chunk)
                             if self._tokenizer_encoder_only
                             else vqvae.encode(chunk)
                         )
-                else:
-                    emb = (
-                        vqvae(chunk)
-                        if self._tokenizer_encoder_only
-                        else vqvae.encode(chunk)
-                    )
-            embeddings.append(emb.detach().cpu())
-            del chunk, emb
+                embeddings.append(emb.detach().cpu())
+                cursor = stop
+                del emb, chunk
+            except torch.OutOfMemoryError:
+                del chunk
+                if torch.cuda.is_available():
+                    torch.cuda.empty_cache()
+                gc.collect()
+
+                if (
+                    not self.config.auto_reduce_tokenizer_chunk
+                    or chunk_size <= self.config.min_tokens_per_chunk
+                ):
+                    raise
+
+                new_chunk_size = max(
+                    self.config.min_tokens_per_chunk,
+                    chunk_size // 2,
+                )
+                if new_chunk_size == chunk_size:
+                    raise
+
+                self.logger.warning(
+                    "VQ-VAE OOM at chunk=%d; retrying current tokens with chunk=%d",
+                    chunk_size,
+                    new_chunk_size,
+                )
+                chunk_size = new_chunk_size
+
+        self.metrics["tokenizer_effective_chunk_size"] = chunk_size
         return torch.cat(embeddings, dim=0)
 
     def _tokenize_series(
