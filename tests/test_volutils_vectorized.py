@@ -48,3 +48,16 @@ def test_exact_256_cube_defaults_to_sitk_array_z_axis():
     patch_shape, z_idx = adjusted_patch_shape((256, 256, 256))
     assert z_idx == 0
     assert patch_shape == [4, 32, 32]
+
+
+def test_dataset_metadata_keeps_original_patch_shape():
+    import numpy as np
+    from tools.mrcommondataset import MrVoxelDataset
+
+    volume = np.ones((8, 64, 64), dtype=np.float32)
+    dataset = MrVoxelDataset([volume])
+    tokens, meta = dataset[0]
+
+    assert tokens.numel() > 0
+    assert meta["PatchShape"] == [4, 32, 32]
+    assert tuple(tokens.shape[1:]) == (8, 32, 32)
