@@ -188,8 +188,11 @@ class DicomUtils:
         """
         try:
             reader = sitk.ImageSeriesReader()
-            dicom_names = reader.GetGDCMSeriesFileNames(directory)
-            dicom_names = natsort.natsorted(DicomUtils.filter_dicom_series(dicom_names))
+            # GetGDCMSeriesFileNames already returns scan-direction ordering
+            # derived from DICOM geometry. Re-sorting by filename can corrupt
+            # slice order when exported filenames do not follow Image Position.
+            dicom_names = list(reader.GetGDCMSeriesFileNames(directory))
+            dicom_names = DicomUtils.filter_dicom_series(dicom_names)
             reader.SetFileNames(dicom_names)
             logging.info('*' * 10)
             
