@@ -44,3 +44,9 @@ otsu_percentage: 5
 prefilter_otsu_before_vq: false
 log_cuda_memory: true
 save_runtime_metrics: true
+
+# Human-readable local reports (raw JSON remains authoritative)
+render_human_report: true
+report_language: "vi"
+report_near_margin: 0.25
+report_show_all_scores: false
