@@ -33,7 +33,7 @@ class MrVoxelDataset(Dataset):
 
         ser_emb_meta = {
                     'PaddedVolShape': pad_shape,
-                    'PatchShape': patch_shape,
+                    'PatchShape': list(patch_shape),
                     'OtsuThresholds': otsu_thresholds,
                     'emb_index': {idx: coord for idx, coord in enumerate(coords)}
                 }
@@ -42,9 +42,10 @@ class MrVoxelDataset(Dataset):
             print("No tokens found for a certain sequence in the study.")
             return torch.tensor([]), ser_emb_meta
 
-        patch_shape[z_idx] = 8  #upsacling due to vqvae
+        vq_patch_shape = list(patch_shape)
+        vq_patch_shape[z_idx] = 8  # upscaling required by the VQ-VAE
         try:
-            tokens = resize_tokens_batch(tokens, patch_shape)
+            tokens = resize_tokens_batch(tokens, vq_patch_shape)
         except Exception as e:
             print(f"Error resizing tokens for volume {idx}: {e}")
             return torch.tensor([]), ser_emb_meta
