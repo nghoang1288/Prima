@@ -29,10 +29,10 @@ min_tokens_per_chunk: 4
 auto_reduce_tokenizer_chunk: true
 attention_backend: "auto"
 
-# Best default for one-study-per-process use on the validated RTX 4060 setup:
+# Candidate default for one-study-per-process use based on measured RTX 4060 stage timings:
 # keep pre-VQ Otsu savings, but avoid the large one-time CPU INT8 quantization
 # startup cost. Use the optimized INT8 profile only for persistent/multi-study
-# processes where quantization can be amortized.
+# processes where quantization can be amortized. Benchmark this profile before adopting it.
 quantize_cpu_heads: false
 head_quant_backend: "torch_dynamic"
 
