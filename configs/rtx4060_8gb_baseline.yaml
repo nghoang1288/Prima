@@ -1,0 +1,31 @@
+# Golden-output profile for an RTX 4060 8 GB.
+# Low VRAM placement is enabled, but task heads remain FP32 on CPU so this is
+# the preferred first run for regression comparisons.
+
+study_dir: "path/to/your/study"
+output_dir: "output/4060-baseline"
+study_description: "MRI BRAIN WO AND W CONTRAST"
+
+tokenizer_model_config: "configs/sample_tokenizer_config.json"
+prima_model_config: "configs/sample_prima_config.json"
+
+batch_size: 1
+device: "cuda"
+stream_dicom: true
+low_vram: true
+visual_dtype: "float16"
+
+# Conservative tokenizer chunk for 8 GB Ada. Increase after measuring peak VRAM.
+max_tokens_per_chunk: 96
+
+# Let PyTorch choose native varlen first and SDPA fallback automatically.
+attention_backend: "auto"
+
+# Golden output: no head quantization, no compiler transforms.
+quantize_cpu_heads: false
+compile_visual: false
+compile_mode: "default"
+
+otsu_percentage: 5
+log_cuda_memory: true
+save_runtime_metrics: true
