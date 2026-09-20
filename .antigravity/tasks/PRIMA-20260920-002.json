@@ -1,0 +1,57 @@
+{
+  "schema_version": 1,
+  "task_id": "PRIMA-20260920-002",
+  "created_at": "2026-09-20T23:59:00+07:00",
+  "target_agent": "antigravity",
+  "status": "pending",
+  "supersedes": null,
+  "code": {
+    "branch": "modern-runtime",
+    "base_sha": "95ea4800b085922991f79941f668fb876eb956ca"
+  },
+  "execution": {
+    "mode": "execute",
+    "requires_user_approval": false,
+    "local_aliases_only": true,
+    "instructions": [
+      "Read ANTIGRAVITY_BRIDGE.md from origin/agent-control before execution and follow it exactly.",
+      "Use the existing local CASE001 alias only. Never print or push the underlying patient name or source path.",
+      "Fetch origin/modern-runtime and verify its head equals code.base_sha before running.",
+      "Run the representative local CASE001 study using configs/rtx4060_8gb_fast.yaml as the source template.",
+      "Reuse an already-valid local staged CASE001 study if available. Otherwise stage CASE001 locally with tools/stage_dicom_study.py using --study-id CASE001 --quiet. Do not modify the original patient source.",
+      "Create a local git-ignored fast-profile config with correct local study_dir, output_dir, tokenizer_model_config and prima_model_config. Read StudyDescription locally from the staging manifest; do not print it to GitHub.",
+      "Keep the fast profile semantics unchanged: pre-VQ Otsu enabled, VQ encoder FP32, visual FP16, CPU heads FP32, quantize_cpu_heads=false, compile_visual=false, fail_on_series_error=true.",
+      "Run end-to-end_inference_pipeline/pipeline.py with the local fast config in a fresh process.",
+      "Verify local outputs exist: CASE001_predictions.json, CASE001_report.md, CASE001_report.html and runtime_metrics.json.",
+      "Open or parse the generated HTML locally enough to confirm it is valid UTF-8 HTML and contains CASE001 plus human-readable Vietnamese sections. Do not screenshot or upload the report.",
+      "Do not push any patient-derived output. Push only aggregate non-PHI runtime metrics and checks in the result JSON.",
+      "Compare fast-profile aggregate timing against the previously measured baseline only if that baseline aggregate is available locally. Do not push per-diagnosis logits."
+    ],
+    "commands": [
+      "git fetch origin modern-runtime agent-control",
+      "git rev-parse origin/modern-runtime",
+      "python -m pytest -q tests/test_render_report.py",
+      "python end-to-end_inference_pipeline/pipeline.py --config <LOCAL_FAST_CONFIG>"
+    ]
+  },
+  "safety": {
+    "allow_patient_data_read_local": true,
+    "allow_patient_derived_output_on_github": false,
+    "allow_destructive_workspace_ops": false,
+    "allow_merge": false,
+    "allow_force_push_code": false
+  },
+  "acceptance": [
+    "origin/modern-runtime equals 95ea4800b085922991f79941f668fb876eb956ca",
+    "tests/test_render_report.py passes",
+    "CASE001 completes with the fast profile and no failed/skipped MRI series",
+    "CASE001_predictions.json exists locally",
+    "CASE001_report.md exists locally",
+    "CASE001_report.html exists locally and renders valid Vietnamese human-readable content",
+    "runtime_metrics.json exists locally",
+    "The result reports aggregate total/tokenizer/PRIMA timing, peak CPU RSS and peak CUDA memory when available",
+    "No DICOM, prediction JSON, patient report, screenshot, patient identifiers, patient source path, or per-diagnosis patient logits are pushed to GitHub",
+    "A terminal result is pushed to .antigravity/results/PRIMA-20260920-002.json"
+  ],
+  "result_path": ".antigravity/results/PRIMA-20260920-002.json"
+}
