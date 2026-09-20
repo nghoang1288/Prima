@@ -5,7 +5,11 @@ import torch
 from typing import Dict, Optional, Tuple, Union, Any
 from pathlib import Path
 import logging
-from generative.networks.nets import VQVAE
+try:
+    from monai.networks.nets import VQVAE
+except ImportError:
+    # Compatibility with the archived MONAI Generative package used by the original repo.
+    from generative.networks.nets import VQVAE
 from tqdm import tqdm
 # CLIP imported lazily in load_prima_model() to avoid pulling in transformers until needed
 
@@ -45,40 +49,63 @@ class FullMRIModel(torch.nn.Module):
 
         self.priorityhead = torch.load(config["priority_head_ckpt"], map_location="cpu")
 
-    def forward(self, x: Dict[str, Any], inference_only_once = False) -> Dict[str, Any]:
-        print("Running CLIP embeddings ...")
+    @torch.inference_mode()
+    def forward(
+        self,
+        x: Dict[str, Any],
+        inference_only_once: bool = False,
+        heads_on_cpu: bool = False,
+    ) -> Dict[str, Any]:
+        print('Running CLIP embeddings ...')
         clip_embed = self.clipvisualmodel(x, retpool=True)
+        cpu_embed = clip_embed.detach().float().cpu() if heads_on_cpu else None
         retdict = {
-            "diagnosis": {},
-            "referral": {},
-            "priority": {},
-            "clip_emb": clip_embed.detach().cpu(),
+            'diagnosis': {},
+            'referral': {},
+            'priority': {},
+            'clip_emb': clip_embed.detach().float().cpu(),
         }
-        print("Running diagnostic heads ...")
+
+        print('Running diagnostic heads ...')
         for name in tqdm(self.diagnosisheads):
             head, idx = self.diagnosisheads[name]
-            device_head = head.to(clip_embed.device)
-            retdict["diagnosis"][name] = device_head(clip_embed)[:, idx] - head.thresh
-            if inference_only_once: # doing this to save GPU memory
-                device_head = device_head.cpu()
-        print("Running referral heads ...")
+            if heads_on_cpu:
+                head.cpu()
+                retdict['diagnosis'][name] = head(cpu_embed)[:, idx] - head.thresh
+            else:
+                head.to(clip_embed.device)
+                retdict['diagnosis'][name] = head(clip_embed)[:, idx] - head.thresh
+                if inference_only_once:
+                    head.cpu()
+
+        print('Running referral heads ...')
         for name in tqdm(self.referralheads):
             head, idx = self.referralheads[name]
-            device_head = head.to(clip_embed.device)
-            retdict["referral"][name] = device_head(clip_embed)[:, idx] - head.thresh
-            if inference_only_once: # doing this to save GPU memory
-                device_head = device_head.cpu()
-        print("Running priorization heads ...")
-        priorityout = self.priorityhead(clip_embed)
-        if len(priorityout[0]) == 4:
-            retdict["priority"]["none"] = priorityout[:, 0]
-            retdict["priority"]["low"] = priorityout[:, 1]
-            retdict["priority"]["medium"] = priorityout[:, 2]
-            retdict["priority"]["high"] = priorityout[:, 3]
+            if heads_on_cpu:
+                head.cpu()
+                retdict['referral'][name] = head(cpu_embed)[:, idx] - head.thresh
+            else:
+                head.to(clip_embed.device)
+                retdict['referral'][name] = head(clip_embed)[:, idx] - head.thresh
+                if inference_only_once:
+                    head.cpu()
+
+        print('Running prioritization head ...')
+        priority_input = cpu_embed if heads_on_cpu else clip_embed
+        if heads_on_cpu:
+            self.priorityhead.cpu()
         else:
-            retdict["priority"]["none"] = priorityout[:, 0]
-            retdict["priority"]["low"] = priorityout[:, 1]
-            retdict["priority"]["high"] = priorityout[:, 2]
+            self.priorityhead.to(clip_embed.device)
+        priorityout = self.priorityhead(priority_input)
+        if len(priorityout[0]) == 4:
+            retdict['priority']['none'] = priorityout[:, 0]
+            retdict['priority']['low'] = priorityout[:, 1]
+            retdict['priority']['medium'] = priorityout[:, 2]
+            retdict['priority']['high'] = priorityout[:, 3]
+        else:
+            retdict['priority']['none'] = priorityout[:, 0]
+            retdict['priority']['low'] = priorityout[:, 1]
+            retdict['priority']['high'] = priorityout[:, 2]
         return retdict
 
     def forward_one_diag_only(self, x: Dict[str, Any], diagname: str) -> torch.Tensor:
@@ -367,7 +394,15 @@ class ModelLoader:
             raise RuntimeError(f"Failed to load classification heads: {str(e)}")
 
     @staticmethod
-    def load_full_prima_model(config: Dict[str, Any]) -> torch.nn.Module:
+    def load_full_prima_model(
+        config: Dict[str, Any],
+        device: Optional[str] = None,
+        low_vram: bool = False,
+        visual_dtype: str = 'float16',
+        quantize_cpu_heads: bool = False,
+        compile_visual: bool = False,
+        compile_mode: str = 'default',
+    ) -> torch.nn.Module:
         """
         Load the complete PRIMA model (FullMRIModel).
         
@@ -380,7 +415,81 @@ class ModelLoader:
         """
         try:
             if not config:
-                raise ValueError("Empty configuration provided")
+                raise ValueError('Empty configuration provided')
+
+            target_device = torch.device(
+                device if device is not None
+                else ('cuda' if torch.cuda.is_available() else 'cpu')
+            )
+            dtype_map = {
+                'float16': torch.float16, 'fp16': torch.float16,
+                'bfloat16': torch.bfloat16, 'bf16': torch.bfloat16,
+                'float32': torch.float32, 'fp32': torch.float32,
+            }
+            if visual_dtype.lower() not in dtype_map:
+                raise ValueError(f'Unsupported visual_dtype: {visual_dtype}')
+
+            def _quantize_heads(full_model: torch.nn.Module) -> None:
+                if not quantize_cpu_heads:
+                    return
+                try:
+                    from torchao.quantization import (
+                        Int8DynamicActivationInt8WeightConfig,
+                        quantize_,
+                    )
+                except ImportError as exc:
+                    raise RuntimeError(
+                        'quantize_cpu_heads=true requires torchao; install requirements-runtime.txt'
+                    ) from exc
+
+                seen = set()
+                for collection_name in ('diagnosisheads', 'referralheads'):
+                    collection = getattr(full_model, collection_name, {})
+                    for name, item in collection.items():
+                        head = item[0]
+                        if id(head) in seen:
+                            continue
+                        seen.add(id(head))
+                        head.cpu().eval()
+                        quantize_(head, Int8DynamicActivationInt8WeightConfig())
+                        logging.info('INT8-quantized CPU head %s/%s', collection_name, name)
+                if id(full_model.priorityhead) not in seen:
+                    full_model.priorityhead.cpu().eval()
+                    quantize_(
+                        full_model.priorityhead,
+                        Int8DynamicActivationInt8WeightConfig(),
+                    )
+                    logging.info('INT8-quantized CPU priority head')
+
+            def _place_model(full_model: torch.nn.Module) -> torch.nn.Module:
+                if hasattr(full_model, 'module'):
+                    full_model = full_model.module
+
+                if low_vram and target_device.type == 'cuda':
+                    full_model.cpu().eval()
+                    _quantize_heads(full_model)
+                    full_model.clipvisualmodel.to(
+                        device=target_device,
+                        dtype=dtype_map[visual_dtype.lower()],
+                    ).eval()
+                    if compile_visual:
+                        full_model.clipvisualmodel = torch.compile(
+                            full_model.clipvisualmodel,
+                            mode=compile_mode,
+                        )
+                    logging.info(
+                        'Low-VRAM placement: visual=%s/%s heads=CPU%s',
+                        target_device, visual_dtype,
+                        '/INT8' if quantize_cpu_heads else '/FP32',
+                    )
+                    return full_model
+
+                full_model = full_model.to(target_device).eval()
+                if compile_visual and hasattr(full_model, 'clipvisualmodel'):
+                    full_model.clipvisualmodel = torch.compile(
+                        full_model.clipvisualmodel, mode=compile_mode
+                    )
+                return full_model
 
             # Single full-model checkpoint: path is given in config (e.g. from pipeline config file)
             if "full_model_ckpt" in config:
@@ -454,17 +563,11 @@ class ModelLoader:
                             setattr(_main, "FullMRIModel", _saved_main_fullmri)
                         elif hasattr(_main, "FullMRIModel") and getattr(_main, "FullMRIModel") is FullMRIModel:
                             delattr(_main, "FullMRIModel")
-                if hasattr(full_model, "module"):
-                    full_model = full_model.module
-                device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-                full_model = full_model.to(device)
-                return full_model
+                return _place_model(full_model)
 
             # Build from components
             full_model = FullMRIModel(config)
-            device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-            full_model = full_model.to(device)
-            return full_model
+            return _place_model(full_model)
 
         except Exception as e:
             msg = str(e)
