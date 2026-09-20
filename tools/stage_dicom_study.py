@@ -59,11 +59,11 @@ def uid_hash(value: str) -> str:
     return hashlib.sha256(value.encode("utf-8")).hexdigest()[:10]
 
 
-def scan(source: Path) -> Tuple[Dict[str, List[Path]], str, str]:
+def scan(source: Path) -> Tuple[Dict[str, List[Path]], str, str, Dict[str, int]]:
     groups: Dict[str, List[Path]] = defaultdict(list)
     study_uids = set()
     study_descriptions = set()
-    modalities = set()
+    skipped_modalities: Dict[str, int] = defaultdict(int)
 
     for path in source.rglob("*"):
         if not path.is_file():
@@ -79,25 +79,20 @@ def scan(source: Path) -> Tuple[Dict[str, List[Path]], str, str]:
 
         if not study_uid or not series_uid:
             continue
+        if modality != "MR":
+            skipped_modalities[modality or "<blank>"] += 1
+            continue
 
         study_uids.add(study_uid)
-        modalities.add(modality)
         if description:
             study_descriptions.add(description)
         groups[series_uid].append(path)
 
     if not groups:
-        raise RuntimeError("No readable DICOM series found")
+        raise RuntimeError("No readable MR DICOM series found")
     if len(study_uids) != 1:
         raise RuntimeError(
-            f"Expected exactly one StudyInstanceUID, found {len(study_uids)}"
-        )
-
-    nonempty_modalities = {m for m in modalities if m}
-    if nonempty_modalities and nonempty_modalities != {"MR"}:
-        raise RuntimeError(
-            "Source contains non-MR modality values: "
-            + ", ".join(sorted(nonempty_modalities))
+            f"Expected exactly one MR StudyInstanceUID, found {len(study_uids)}"
         )
 
     # A study should normally have one StudyDescription. If exporters copied
@@ -107,7 +102,7 @@ def scan(source: Path) -> Tuple[Dict[str, List[Path]], str, str]:
         if len(study_descriptions) == 1
         else ""
     )
-    return groups, next(iter(study_uids)), description
+    return groups, next(iter(study_uids)), description, dict(skipped_modalities)
 
 
 def main() -> None:
@@ -136,7 +131,7 @@ def main() -> None:
         shutil.rmtree(destination)
     destination.mkdir(parents=True)
 
-    groups, study_uid, study_description = scan(source)
+    groups, study_uid, study_description, skipped_modalities = scan(source)
 
     series_rows = []
     for series_index, (series_uid, files) in enumerate(
@@ -164,6 +159,7 @@ def main() -> None:
         "study_description": study_description,
         "series_count": len(series_rows),
         "series": series_rows,
+        "skipped_non_mr_instances": skipped_modalities,
         "note": (
             "Local staging copy only. DICOM contents were not de-identified or modified."
         ),
