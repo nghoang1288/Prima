@@ -1,0 +1,27 @@
+{
+  "schema_version": 1,
+  "task_id": "PRIMA-YYYYMMDD-NNN",
+  "agent_id": "local-agent-id",
+  "status": "success|failed|blocked",
+  "started_at": "RFC3339 timestamp",
+  "finished_at": "RFC3339 timestamp",
+  "code": {
+    "branch": "branch actually used",
+    "sha": "exact 40-char SHA actually used"
+  },
+  "checks": [
+    {
+      "name": "human-readable check name",
+      "status": "pass|fail|skipped",
+      "detail": "concise non-PHI detail"
+    }
+  ],
+  "artifacts": {
+    "code_branch": null,
+    "commit_sha": null,
+    "pull_request": null
+  },
+  "metrics": {},
+  "blockers": [],
+  "next_recommendation": "concise non-PHI next action"
+}
