@@ -196,7 +196,14 @@ class DicomUtils:
             # derived from DICOM geometry. Re-sorting by filename can corrupt
             # slice order when exported filenames do not follow Image Position.
             dicom_names = list(reader.GetGDCMSeriesFileNames(directory))
+            original_instance_count = len(dicom_names)
             dicom_names = DicomUtils.filter_dicom_series(dicom_names)
+            if len(dicom_names) != original_instance_count:
+                logging.warning(
+                    "DICOM size filter kept %d/%d instances in one series",
+                    len(dicom_names),
+                    original_instance_count,
+                )
             reader.SetFileNames(dicom_names)
             logging.info('*' * 10)
             
