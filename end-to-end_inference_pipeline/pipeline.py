@@ -262,6 +262,24 @@ class Pipeline:
             tokenizer_config = self._load_config_file_or_dict(
                 self.config.tokenizer_model_config
             )
+            if isinstance(self.config.tokenizer_model_config, str):
+                cfg_path = Path(self.config.tokenizer_model_config).resolve()
+                params = tokenizer_config.get("vqvae_config", {})
+                ckpt = params.get("ckpt_path")
+                if ckpt:
+                    p = Path(ckpt)
+                    if not p.is_absolute():
+                        candidates = [
+                            (Path.cwd() / p).resolve(),
+                            (cfg_path.parent / p).resolve(),
+                            (_REPO_ROOT / p).resolve(),
+                        ]
+                        resolved = next(
+                            (candidate for candidate in candidates if candidate.exists()),
+                            candidates[1],
+                        )
+                        params["ckpt_path"] = str(resolved)
+
             vqvae = ModelLoader.load_vqvae_model(tokenizer_config)
 
             use_encoder_only = (
