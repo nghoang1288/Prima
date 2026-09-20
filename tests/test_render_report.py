@@ -33,7 +33,7 @@ def test_vietnamese_report_uses_threshold_semantics_and_priority_argmax():
     )
 
     assert "Ưu tiên thấp" in markdown
-    assert "U thần kinh đệm người lớn" in markdown
+    assert "U thần kinh đệm ở người lớn" in markdown
     assert "Xuất huyết nội sọ" in markdown
     assert "margin `+0.420`" in markdown
     assert "không phải phần trăm xác suất bệnh" in markdown
