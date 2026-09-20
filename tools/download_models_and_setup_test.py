@@ -12,9 +12,11 @@ Requires: pip install gdown
 """
 
 import argparse
+import hashlib
 import json
 import os
 import sys
+from datetime import datetime, timezone
 from pathlib import Path
 
 
@@ -42,6 +44,11 @@ def main() -> int:
         "--skip-download",
         action="store_true",
         help="Only create folders and configs; do not download weights.",
+    )
+    parser.add_argument(
+        "--force-download",
+        action="store_true",
+        help="Redownload official weights even if files already exist.",
     )
     args = parser.parse_args()
     repo_root = args.repo_root or get_repo_root()
@@ -109,9 +116,12 @@ def main() -> int:
     tokenizer_path = tokenizer_dir / "vqvae_model_step16799.pth"
 
     def download(file_id: str, output: Path, name: str) -> bool:
-        if output.exists():
+        if output.exists() and not args.force_download:
             print(f"  {name} already exists at {output}; skipping.")
+            print("  Use --force-download if provenance/version is unknown.")
             return True
+        if output.exists():
+            output.unlink()
         print(f"  Downloading {name}...")
         try:
             gdown.download(
@@ -133,6 +143,34 @@ def main() -> int:
     ok2 = download(TOKENIZER_ID, tokenizer_path, "Tokenizer (VQ-VAE)")
     if not ok1 or not ok2:
         return 1
+
+    def sha256(path: Path) -> str:
+        h = hashlib.sha256()
+        with path.open("rb") as handle:
+            for block in iter(lambda: handle.read(8 * 1024 * 1024), b""):
+                h.update(block)
+        return h.hexdigest()
+
+    manifest = {
+        "generated_at_utc": datetime.now(timezone.utc).isoformat(),
+        "source": "Official MLNeurosurg/Prima Google Drive IDs",
+        "full_model": {
+            "file_id": FULL_MODEL_ID,
+            "path": str(full_model_path.relative_to(repo_root)),
+            "size_bytes": full_model_path.stat().st_size,
+            "sha256": sha256(full_model_path),
+            "priority_model_note": "Use checkpoint corrected on 2026-02-19 or later.",
+        },
+        "tokenizer": {
+            "file_id": TOKENIZER_ID,
+            "path": str(tokenizer_path.relative_to(repo_root)),
+            "size_bytes": tokenizer_path.stat().st_size,
+            "sha256": sha256(tokenizer_path),
+        },
+    }
+    manifest_path = trained / "model_manifest.json"
+    manifest_path.write_text(json.dumps(manifest, indent=2))
+    print(f"  Wrote model manifest: {manifest_path}")
 
     print_next_steps(repo_root, mri_case_dir)
     return 0
