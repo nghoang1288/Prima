@@ -1,4 +1,4 @@
--r requirements-runtime.txt
+-r requirements-runtime-2026-09.lock.txt
 # Optional experimental backend for A/B testing. The conservative RTX 4060
 # profile uses torch.ao dynamic INT8 on CPU because current TorchAO CPU
 # performance can be workload-dependent.
