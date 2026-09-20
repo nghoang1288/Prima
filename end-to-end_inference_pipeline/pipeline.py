@@ -101,6 +101,17 @@ class PipelineConfig:
             raise ValueError(
                 "head_quant_backend must be one of: torch_dynamic, torchao"
             )
+        if cfg.max_tokens_per_chunk < 1 or cfg.min_tokens_per_chunk < 1:
+            raise ValueError("Tokenizer chunk sizes must be >= 1")
+        if cfg.min_tokens_per_chunk > cfg.max_tokens_per_chunk:
+            raise ValueError(
+                "min_tokens_per_chunk cannot exceed max_tokens_per_chunk"
+            )
+        valid_dtypes = {"float16", "fp16", "bfloat16", "bf16", "float32", "fp32"}
+        if cfg.tokenizer_dtype.lower() not in valid_dtypes:
+            raise ValueError(f"Unsupported tokenizer_dtype: {cfg.tokenizer_dtype}")
+        if cfg.visual_dtype.lower() not in valid_dtypes:
+            raise ValueError(f"Unsupported visual_dtype: {cfg.visual_dtype}")
         return cfg
 
 
@@ -662,7 +673,8 @@ class Pipeline:
             with torch.inference_mode():
                 if self._device().type == "cuda":
                     with torch.amp.autocast(
-                        device_type="cuda", dtype=torch.float16
+                        device_type="cuda",
+                        dtype=self._dtype_from_name(self.config.visual_dtype),
                     ):
                         predictions = model(
                             prima_input,
