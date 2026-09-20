@@ -1,0 +1,29 @@
+# Optimized single-study profile for ASUS/other RTX 4060 8 GB cards.
+# Compare predictions against rtx4060_8gb_baseline.yaml before routine use.
+
+study_dir: "path/to/your/study"
+output_dir: "output/4060-optimized"
+study_description: "MRI BRAIN WO AND W CONTRAST"
+
+tokenizer_model_config: "configs/sample_tokenizer_config.json"
+prima_model_config: "configs/sample_prima_config.json"
+
+batch_size: 1
+device: "cuda"
+stream_dicom: true
+low_vram: true
+visual_dtype: "float16"
+max_tokens_per_chunk: 96
+attention_backend: "auto"
+
+# Biggest RAM optimization. TorchAO is preferred; PyTorch dynamic INT8 is fallback.
+quantize_cpu_heads: true
+
+# Leave compile off for the first real case. Enable only after baseline metrics
+# show stable shapes and enough VRAM headroom.
+compile_visual: false
+compile_mode: "max-autotune-no-cudagraphs"
+
+otsu_percentage: 5
+log_cuda_memory: true
+save_runtime_metrics: true
