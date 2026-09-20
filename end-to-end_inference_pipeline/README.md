@@ -39,3 +39,59 @@ To run the end-to-end pipeline, first you need to download both the [Prima model
 python /end-to-end_inference_pipeline/pipeline.py --config configs/pipeline_config.yaml
 ```
 
+
+
+## Low-VRAM single-study inference
+
+This fork adds an optional low-VRAM path intended for one MRI study at a time.
+
+With `low_vram: true`:
+
+1. The VQ-VAE tokenizer runs on the configured CUDA device.
+2. Tokenizer embeddings are copied back to CPU and the tokenizer is unloaded.
+3. The full PRIMA checkpoint is deserialized on CPU.
+4. Only `clipvisualmodel` is moved to CUDA, using `visual_dtype`.
+5. The study embedding is copied back to CPU once.
+6. Diagnosis, referral, and priority heads run on CPU, so they do not consume GPU VRAM.
+7. CUDA allocator usage is logged at major stages when `log_cuda_memory: true`.
+
+Recommended starting config for an 8 GB RTX 4060:
+
+```yaml
+batch_size: 1
+device: "cuda"
+low_vram: true
+visual_dtype: "float16"
+log_cuda_memory: true
+max_tokens_per_chunk: 128
+```
+
+If the VQ-VAE tokenizer still runs out of memory, reduce `max_tokens_per_chunk` to 96, 64, or 32.
+
+The low-VRAM mode deliberately keeps task heads in system RAM. For this reason, 32 GB system RAM is a practical minimum target and 64 GB is more comfortable when loading the full checkpoint.
+
+### Run
+
+From the repository root:
+
+```bash
+python end-to-end_inference_pipeline/pipeline.py --config configs/pipeline_config.yaml
+```
+
+Watch `pipeline.log` for lines similar to:
+
+```text
+CUDA memory [VQ-VAE loaded]: ...
+CUDA memory [VQ-VAE unloaded]: ...
+CUDA memory [after PRIMA load]: ...
+CUDA memory [PRIMA inference complete]: ...
+```
+
+Those values are the quickest way to determine whether the visual backbone itself fits a specific GPU.
+
+### Notes
+
+- This path is aimed at inference, not training.
+- It processes one study at a time; `batch_size: 1` is recommended.
+- The original full-GPU behavior is preserved by setting `low_vram: false`.
+- If a particular study has many long/derived series, VRAM use can still increase because transformer activation memory depends on token count.
