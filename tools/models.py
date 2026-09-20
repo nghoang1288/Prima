@@ -287,14 +287,15 @@ class ModelLoader:
             required_params = [
                 "spatial_dims", "in_channels", "out_channels",
                 "num_res_layers", "downsample_parameters", "upsample_parameters",
-                "num_channels", "num_res_channels", "num_embeddings",
-                "embedding_dim"
+                "num_res_channels", "num_embeddings", "embedding_dim"
             ]
             
             # Validate required parameters
             missing_params = [p for p in required_params if p not in params]
             if missing_params:
                 raise ValueError(f"Missing required parameters: {missing_params}")
+            if "num_channels" not in params and "channels" not in params:
+                raise ValueError("Missing required parameter: num_channels/channels")
 
             # Initialize the model. MONAI Generative used the name
             # "num_channels"; MONAI core 1.6 renamed this constructor argument
@@ -329,7 +330,23 @@ class ModelLoader:
                     raise FileNotFoundError(f"Checkpoint not found at {model_path}")
 
                 logging.info(f"Loading pretrained model from {model_path}")
-                pl_sd = torch.load(model_path, map_location="cpu")
+                try:
+                    pl_sd = torch.load(
+                        model_path,
+                        map_location="cpu",
+                        weights_only=True,
+                        mmap=True,
+                    )
+                except RuntimeError as exc:
+                    logging.warning(
+                        "VQ-VAE checkpoint mmap unavailable (%s); retrying normally",
+                        exc,
+                    )
+                    pl_sd = torch.load(
+                        model_path,
+                        map_location="cpu",
+                        weights_only=True,
+                    )
                 vqvae_model.load_state_dict(pl_sd)
             else:
                 logging.info("Initializing new VQVAE model with random weights")
@@ -612,9 +629,25 @@ class ModelLoader:
                     if hasattr(pickle, _attr):
                         setattr(_prima_pickle, _attr, getattr(pickle, _attr))
                 try:
-                    full_model = torch.load(
-                        str(ckpt_path), map_location="cpu", weights_only=False, pickle_module=_prima_pickle
-                    )
+                    try:
+                        full_model = torch.load(
+                            str(ckpt_path),
+                            map_location="cpu",
+                            weights_only=False,
+                            pickle_module=_prima_pickle,
+                            mmap=True,
+                        )
+                    except RuntimeError as exc:
+                        logging.warning(
+                            "Full checkpoint mmap unavailable (%s); retrying normally",
+                            exc,
+                        )
+                        full_model = torch.load(
+                            str(ckpt_path),
+                            map_location="cpu",
+                            weights_only=False,
+                            pickle_module=_prima_pickle,
+                        )
                 finally:
                     if sys.modules.get("complete_visual_model") is this_module:
                         del sys.modules["complete_visual_model"]
