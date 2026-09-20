@@ -17,7 +17,9 @@ def scalar(value: Any) -> float:
 
 
 def compare_group(
-    baseline: Dict[str, Any], candidate: Dict[str, Any]
+    baseline: Dict[str, Any],
+    candidate: Dict[str, Any],
+    track_zero_flip: bool = True,
 ) -> Tuple[Dict[str, Any], int]:
     names = sorted(set(baseline) | set(candidate))
     rows = {}
@@ -28,14 +30,15 @@ def compare_group(
             continue
         a = scalar(baseline[name])
         b = scalar(candidate[name])
-        flip = (a >= 0) != (b >= 0)
-        sign_flips += int(flip)
+        flip = (a >= 0) != (b >= 0) if track_zero_flip else None
+        sign_flips += int(bool(flip)) if track_zero_flip else 0
         rows[name] = {
             "baseline": a,
             "candidate": b,
             "abs_diff": abs(a - b),
-            "sign_flip_at_zero": flip,
         }
+        if track_zero_flip:
+            rows[name]["sign_flip_at_zero"] = flip
     return rows, sign_flips
 
 
@@ -53,8 +56,12 @@ def main() -> None:
     all_diffs = []
     total_flips = 0
 
-    for group in ("diagnosis", "referral", "priority"):
-        rows, flips = compare_group(a.get(group, {}), b.get(group, {}))
+    for group in ("diagnosis", "referral"):
+        rows, flips = compare_group(
+            a.get(group, {}),
+            b.get(group, {}),
+            track_zero_flip=True,
+        )
         report["groups"][group] = rows
         total_flips += flips
         all_diffs.extend(
@@ -63,10 +70,40 @@ def main() -> None:
             if "abs_diff" in item
         )
 
+    priority_rows, _ = compare_group(
+        a.get("priority", {}),
+        b.get("priority", {}),
+        track_zero_flip=False,
+    )
+    report["groups"]["priority"] = priority_rows
+    all_diffs.extend(
+        item["abs_diff"]
+        for item in priority_rows.values()
+        if "abs_diff" in item
+    )
+
+    priority_labels = sorted(
+        set(a.get("priority", {})) & set(b.get("priority", {}))
+    )
+    if priority_labels:
+        baseline_priority = {
+            label: scalar(a["priority"][label]) for label in priority_labels
+        }
+        candidate_priority = {
+            label: scalar(b["priority"][label]) for label in priority_labels
+        }
+        baseline_label = max(baseline_priority, key=baseline_priority.get)
+        candidate_label = max(candidate_priority, key=candidate_priority.get)
+        report["priority_decision"] = {
+            "baseline": baseline_label,
+            "candidate": candidate_label,
+            "changed": baseline_label != candidate_label,
+        }
+
     report["summary"] = {
         "max_abs_diff": max(all_diffs) if all_diffs else 0.0,
         "mean_abs_diff": float(np.mean(all_diffs)) if all_diffs else 0.0,
-        "sign_flips_at_zero": total_flips,
+        "threshold_sign_flips_at_zero": total_flips,
     }
 
     if "clip_emb" in a and "clip_emb" in b:
