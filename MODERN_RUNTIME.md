@@ -314,3 +314,47 @@ runtime logs. Local deployment configs matching `configs/local_*.yaml` and
 Do not connect this release candidate to PACS write-back or automated clinical
 reporting. Complete baseline/optimized equivalence review on representative
 de-identified cases first.
+
+
+## Human-readable reports
+
+The raw prediction JSON remains the authoritative machine output. By default,
+RTX 4060 profiles also render two local presentation files after each run:
+
+```text
+CASE001_predictions.json
+CASE001_report.md
+CASE001_report.html
+```
+
+The Vietnamese report:
+
+- selects priority by argmax;
+- lists diagnosis/referral outputs with margin >= 0 as above-threshold;
+- separately lists near-threshold negative margins;
+- calls scores threshold margins, never disease probabilities;
+- omits the raw CLIP embedding;
+- keeps the original PRIMA label code beside any humanized label;
+- includes non-PHI runtime metrics.
+
+Set:
+
+```yaml
+render_human_report: true
+report_language: "vi"
+report_near_margin: 0.25
+report_show_all_scores: false
+```
+
+The report files are git-ignored because they are patient-derived outputs.
+
+For one-study-per-process use on the validated RTX 4060 workstation, start with:
+
+```text
+configs/rtx4060_8gb_fast.yaml
+```
+
+This keeps pre-VQ Otsu filtering but leaves task heads FP32, avoiding the large
+one-time INT8 quantization startup cost observed during hardware validation.
+The INT8 optimized profile remains useful to evaluate for a future persistent
+multi-study service where quantization can be amortized.
