@@ -444,6 +444,7 @@ class ModelLoader:
         low_vram: bool = False,
         visual_dtype: str = 'float16',
         quantize_cpu_heads: bool = False,
+        head_quant_backend: str = 'torch_dynamic',
         compile_visual: bool = False,
         compile_mode: str = 'default',
     ) -> torch.nn.Module:
@@ -477,39 +478,53 @@ class ModelLoader:
                 if not quantize_cpu_heads:
                     return
 
-                # Head modules are also registered in ModuleLists by the
-                # historical model class. Clear those alias references before
-                # replacement quantization so the old FP32 module can be freed
-                # immediately after each dictionary entry is replaced.
+                backend = head_quant_backend.lower()
+                if backend not in {'torch_dynamic', 'torchao'}:
+                    raise ValueError(
+                        "head_quant_backend must be 'torch_dynamic' or 'torchao'"
+                    )
+
+                # Head modules are also registered in ModuleLists by historical
+                # model classes. Clear aliases so replaced FP32 modules can be
+                # reclaimed promptly.
                 for registry_name in (
                     'm1', 'm2', 'diagnosis_modules', 'referral_modules'
                 ):
                     if hasattr(full_model, registry_name):
                         setattr(full_model, registry_name, torch.nn.ModuleList())
 
-                quantizer_name = 'torchao'
-                try:
-                    from torchao.quantization import (
-                        Int8DynamicActivationInt8WeightConfig,
-                        quantize_,
-                    )
+                if backend == 'torchao':
+                    try:
+                        from torchao.quantization import (
+                            Int8DynamicActivationInt8WeightConfig,
+                            quantize_,
+                        )
+                    except Exception as exc:
+                        raise RuntimeError(
+                            "head_quant_backend=torchao requested but TorchAO "
+                            f"is unavailable/incompatible: {exc}"
+                        ) from exc
 
                     def _quantize_one(module: torch.nn.Module) -> torch.nn.Module:
                         module = module.cpu().eval()
-                        quantize_(module, Int8DynamicActivationInt8WeightConfig(version=2))
+                        quantize_(
+                            module,
+                            Int8DynamicActivationInt8WeightConfig(version=2),
+                        )
                         return module
-                except Exception as exc:
-                    quantizer_name = 'torch.ao.dynamic'
-                    logging.warning(
-                        'TorchAO unavailable/incompatible (%s); falling back to PyTorch dynamic INT8',
-                        exc,
-                    )
 
+                    quantizer_name = 'torchao'
+                else:
                     def _quantize_one(module: torch.nn.Module) -> torch.nn.Module:
                         module = module.cpu().eval()
                         return torch.ao.quantization.quantize_dynamic(
-                            module, {torch.nn.Linear}, dtype=torch.qint8, inplace=False
+                            module,
+                            {torch.nn.Linear},
+                            dtype=torch.qint8,
+                            inplace=False,
                         )
+
+                    quantizer_name = 'torch.ao.dynamic'
 
                 quantized_by_object_id = {}
                 for collection_name in ('diagnosisheads', 'referralheads'):
@@ -526,12 +541,9 @@ class ModelLoader:
                         quantized.thresh = thresh
                         collection[name] = [quantized, idx]
                         del head
-                        logging.info(
-                            'INT8-quantized CPU head %s/%s via %s',
-                            collection_name, name, quantizer_name,
-                        )
 
                 full_model.priorityhead = _quantize_one(full_model.priorityhead)
+
                 if hasattr(full_model, 'm1'):
                     full_model.m1 = torch.nn.ModuleList(
                         [item[0] for item in full_model.diagnosisheads.values()]
@@ -548,7 +560,11 @@ class ModelLoader:
                     full_model.referral_modules = torch.nn.ModuleList(
                         [item[0] for item in full_model.referralheads.values()]
                     )
-                logging.info('INT8 CPU task-head quantization complete via %s', quantizer_name)
+
+                logging.info(
+                    'INT8 CPU task-head quantization complete via %s',
+                    quantizer_name,
+                )
 
             def _place_model(full_model: torch.nn.Module) -> torch.nn.Module:
                 if hasattr(full_model, 'module'):
@@ -569,7 +585,7 @@ class ModelLoader:
                     logging.info(
                         'Low-VRAM placement: visual=%s/%s heads=CPU%s',
                         target_device, visual_dtype,
-                        '/INT8' if quantize_cpu_heads else '/FP32',
+                        f'/INT8:{head_quant_backend}' if quantize_cpu_heads else '/FP32',
                     )
                     return full_model
 
