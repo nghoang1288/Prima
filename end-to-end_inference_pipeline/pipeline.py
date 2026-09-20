@@ -75,6 +75,7 @@ class PipelineConfig:
     quantize_cpu_heads: bool = False
     head_quant_backend: str = "torch_dynamic"
     prune_inference_only: bool = True
+    release_cpu_token_state_before_prima: bool = True
     compile_visual: bool = False
     compile_mode: str = "default"
     attention_backend: str = "auto"
@@ -800,6 +801,17 @@ class Pipeline:
             prima_input, self._device(), floating_dtype=input_dtype
         )
         self._stage_done("prepare_prima_input", prep_started)
+
+        if self.config.release_cpu_token_state_before_prima:
+            # The caller owns these lists too. Clearing them releases the large
+            # CPU VQ embeddings/Otsu metadata before the full pickled checkpoint
+            # is loaded, reducing the system-RAM peak on 32 GB workstations.
+            series_embeddings.clear()
+            series_names.clear()
+            if all_ser_emb_meta is not None:
+                all_ser_emb_meta.clear()
+            gc.collect()
+            self._log_memory("CPU token state released before PRIMA load")
 
         model = self.load_full_prima_model()
         self._reset_cuda_peak()
