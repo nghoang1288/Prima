@@ -12,7 +12,7 @@ The primary target is **one MRI study at a time on an NVIDIA RTX 4060 8 GB**.
 - Preprocessing uses float32 rather than the previous float64 intermediate copy.
 - 3D patch extraction is vectorized with PyTorch unfold operations.
 - Only the VQ-VAE encoder is moved to CUDA; decoder/codebook stay off GPU.
-- VQ-VAE runs in bounded FP16 chunks and is fully released before PRIMA.
+- VQ-VAE runs in bounded chunks and is fully released before PRIMA.
 - Tokenizer chunk size automatically backs off on CUDA OOM down to a safe minimum.
 - The full checkpoint stays in CPU RAM in low-VRAM mode.
 - Only the PRIMA visual backbone is moved to CUDA in FP16.
@@ -177,11 +177,11 @@ If VQ-VAE OOMs, reduce:
 
 ```yaml
 max_tokens_per_chunk: 96
-min_tokens_per_chunk: 16
+min_tokens_per_chunk: 4
 auto_reduce_tokenizer_chunk: true
 ```
 
-The runtime automatically retries 96 -> 48 -> 24 -> 16 when tokenizer OOM is
+The runtime automatically retries 96 -> 48 -> 24 -> 12 -> 6 -> 4 when tokenizer OOM is
 encountered. This auto-backoff is intentionally limited to the independently
 chunkable VQ-VAE stage.
 
@@ -194,7 +194,7 @@ visual_dtype: "float16"
 compile_visual: false
 attention_backend: "auto"
 tokenizer_encoder_only: true
-tokenizer_dtype: "float16"
+tokenizer_dtype: "float32"
 prune_inference_only: true
 ```
 
@@ -246,9 +246,7 @@ it.
 ## Current validation boundary
 
 The repository-level CPU tests verify the vectorized patch extraction and SDPA
-attention math. The full 4060 path cannot be considered hardware-validated until
-the official weights and at least one real DICOM study have been run on the
-target machine. Use the baseline/optimized comparison above for that validation.
+attention math. The official weights and one representative real DICOM study have now been run on the target RTX 4060 8 GB workstation. Baseline inference completed reproducibly; multi-case validation is still required before merge or any clinical workflow integration.
 
 
 ## September 2026 audit
