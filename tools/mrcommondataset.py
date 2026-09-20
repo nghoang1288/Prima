@@ -24,7 +24,7 @@ class MrVoxelDataset(Dataset):
         volume = self.series_volumes[idx]
         # tokenize_volume expects numpy/torch with .shape; convert SimpleITK Image if needed
         if sitk is not None and hasattr(volume, "GetSize"):
-            volume = np.asarray(sitk.GetArrayFromImage(volume), dtype=np.float64)
+            volume = np.asarray(sitk.GetArrayFromImage(volume), dtype=np.float32)
         
         tokens, coords, otsu, pad_shape, patch_shape, z_idx = tokenize_volume(volume,
                                                               mask_perc=50)
