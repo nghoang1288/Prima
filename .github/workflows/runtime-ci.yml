@@ -28,5 +28,7 @@ jobs:
           python -m compileall -q tools Prima_training_and_evaluation end-to-end_inference_pipeline
 
       - name: Run focused runtime tests
+        env:
+          PYTHONPATH: ${{ github.workspace }}
         run: |
-          pytest -q tests/test_volutils_vectorized.py tests/test_attention_sdpa.py
+          python -m pytest -q tests/test_volutils_vectorized.py tests/test_attention_sdpa.py
