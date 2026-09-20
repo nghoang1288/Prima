@@ -37,7 +37,7 @@ from Prima_training_and_evaluation.patchify import MedicalImagePatchifier
 from tools.DicomUtils import DicomUtils
 from tools.models import ModelLoader
 from tools.mrcommondataset import MrVoxelDataset
-from tools.utilities import chartovec, filtercoords
+from tools.utilities import chartovec, filtercoords, select_otsu_indices
 
 
 @dataclass
@@ -74,6 +74,7 @@ class PipelineConfig:
     attention_backend: str = "auto"
 
     otsu_percentage: int = 5
+    prefilter_otsu_before_vq: bool = False
     log_cuda_memory: bool = True
     save_runtime_metrics: bool = True
 
@@ -387,22 +388,46 @@ class Pipeline:
         started = time.perf_counter()
         dataset = MrVoxelDataset([image])
         tokens, meta = dataset[0]
+        original_token_count = int(tokens.shape[0])
+
+        if self.config.prefilter_otsu_before_vq and original_token_count:
+            useids, positions, selected_percent = select_otsu_indices(
+                meta,
+                original_token_count,
+                start_percentage=self.config.otsu_percentage,
+                min_count=25,
+            )
+            tokens = tokens[useids]
+            meta = dict(meta)
+            meta["_prima_prefiltered"] = True
+            meta["_prima_selected_coords"] = positions
+            meta["_prima_selected_percent"] = selected_percent
+            self.logger.info(
+                "Pre-VQ Otsu filter series=%s threshold=%d before=%d after=%d",
+                series_name,
+                selected_percent,
+                original_token_count,
+                len(tokens),
+            )
+
         embedding = self._encode_tokens(tokens, vqvae)
         elapsed = time.perf_counter() - started
 
         self.metrics["series"].append(
             {
                 "name": series_name,
-                "tokens": int(tokens.shape[0]),
+                "tokens_before_otsu": original_token_count,
+                "tokens_encoded": int(tokens.shape[0]),
                 "seconds": elapsed,
                 "cpu_rss_gib": self._rss_gib(),
                 **self._cuda_snapshot(),
             }
         )
         self.logger.info(
-            "Tokenized series %s: %d tokens in %.2fs",
+            "Tokenized series %s: encoded %d/%d patches in %.2fs",
             series_name,
             tokens.shape[0],
+            original_token_count,
             elapsed,
         )
         del tokens
@@ -504,6 +529,11 @@ class Pipeline:
             coords = []
             filtered_embeddings = []
             for i, meta in enumerate(all_ser_emb_meta):
+                if meta.get("_prima_prefiltered", False):
+                    filtered_embeddings.append(series_embeddings[i])
+                    coords.append(meta["_prima_selected_coords"])
+                    continue
+
                 chosen = None
                 for percent in range(self.config.otsu_percentage, -1, -1):
                     embs, embspos, _ = filtercoords(
