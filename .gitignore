@@ -2,3 +2,7 @@
 test
 Prima_training_and_evaluation/fake_data
 configs/test_pipeline_config_2.yaml
+.venv/
+output/
+configs/local_*.yaml
+*.local.yaml
