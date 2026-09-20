@@ -156,21 +156,29 @@ class Pipeline:
         if not torch.cuda.is_available() or self._device().type != "cuda":
             return {}
         dev = self._device()
+        free_bytes, total_bytes = torch.cuda.mem_get_info(dev)
         return {
             "allocated_gib": torch.cuda.memory_allocated(dev) / (1024**3),
             "reserved_gib": torch.cuda.memory_reserved(dev) / (1024**3),
             "peak_allocated_gib": torch.cuda.max_memory_allocated(dev) / (1024**3),
+            "peak_reserved_gib": torch.cuda.max_memory_reserved(dev) / (1024**3),
+            "device_free_gib": free_bytes / (1024**3),
+            "device_total_gib": total_bytes / (1024**3),
         }
 
     def _log_memory(self, label: str) -> None:
         snap = self._cuda_snapshot()
         if snap and self.config.log_cuda_memory:
             self.logger.info(
-                "CUDA memory [%s]: allocated=%.2f GiB reserved=%.2f GiB peak=%.2f GiB",
+                "CUDA memory [%s]: allocated=%.2f GiB reserved=%.2f GiB "
+                "peak_alloc=%.2f GiB peak_reserved=%.2f GiB free=%.2f/%.2f GiB",
                 label,
                 snap["allocated_gib"],
                 snap["reserved_gib"],
                 snap["peak_allocated_gib"],
+                snap["peak_reserved_gib"],
+                snap["device_free_gib"],
+                snap["device_total_gib"],
             )
         self.logger.info("CPU RSS [%s]: %.2f GiB", label, self._rss_gib())
 
