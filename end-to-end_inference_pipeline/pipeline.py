@@ -15,6 +15,7 @@ path intended for workstation GPUs (notably 8 GB Ada cards):
 import argparse
 import contextlib
 import gc
+import hashlib
 import json
 import logging
 import os
@@ -54,6 +55,8 @@ class PipelineConfig:
     tokenizer_model_config: str
     prima_model_config: str
     study_description: str
+    study_id: Optional[str] = None
+    redact_source_path: bool = True
 
     batch_size: int = 1
     num_workers: int = 0
@@ -136,7 +139,10 @@ class Pipeline:
         self.output_dir.mkdir(parents=True, exist_ok=True)
 
         self._setup_logging()
-        self.logger.info("Initializing pipeline with config: %s", self.config)
+        self.study_id = self._resolve_study_id()
+        safe_config = self._safe_config_dict()
+        self.logger.info("Initializing pipeline for study_id=%s", self.study_id)
+        self.logger.info("Runtime config (source path redacted): %s", safe_config)
         os.environ["PRIMA_ATTENTION_BACKEND"] = self.config.attention_backend
 
         self.tokenizer_model: Optional[torch.nn.Module] = None
@@ -146,7 +152,8 @@ class Pipeline:
 
         self._process = psutil.Process()
         self.metrics: Dict[str, Any] = {
-            "config": asdict(self.config),
+            "study_id": self.study_id,
+            "config": safe_config,
             "stages": {},
             "series": [],
             "cuda_available": torch.cuda.is_available(),
@@ -161,6 +168,31 @@ class Pipeline:
                     "GPU has %.1f GiB VRAM but low_vram=false; enable low_vram for 8 GB-class cards",
                     total_vram_gib,
                 )
+
+    def _resolve_study_id(self) -> str:
+        if self.config.study_id:
+            value = str(self.config.study_id).strip()
+            if not value:
+                raise ValueError("study_id cannot be blank")
+            safe = "".join(
+                ch if ch.isalnum() or ch in "-_." else "_"
+                for ch in value
+            ).strip("._")
+            if not safe:
+                raise ValueError("study_id contains no safe filename characters")
+            return safe[:128]
+
+        # Never derive output filenames from a potentially identifying folder
+        # name. Use a deterministic anonymous ID instead.
+        source = str(Path(self.config.study_dir).expanduser().resolve())
+        digest = hashlib.sha256(source.encode("utf-8")).hexdigest()[:12]
+        return f"study-{digest}"
+
+    def _safe_config_dict(self) -> Dict[str, Any]:
+        data = asdict(self.config)
+        if self.config.redact_source_path:
+            data["study_dir"] = "<redacted>"
+        return data
 
     def _setup_logging(self) -> None:
         log_file = self.output_dir / "pipeline.log"
@@ -737,9 +769,8 @@ class Pipeline:
             self._stage_done("prima_inference", inference_started)
             self._log_memory("PRIMA inference complete")
 
-            study_id = Path(self.config.study_dir).name or "study"
             output_path = (
-                self.output_dir / f"{study_id}_predictions.json"
+                self.output_dir / f"{self.study_id}_predictions.json"
             ).resolve()
             with open(output_path, "w") as f:
                 json.dump(self._serializable(predictions), f, indent=2)
