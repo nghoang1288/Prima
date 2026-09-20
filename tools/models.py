@@ -432,34 +432,62 @@ class ModelLoader:
             def _quantize_heads(full_model: torch.nn.Module) -> None:
                 if not quantize_cpu_heads:
                     return
+
+                quantizer_name = 'torchao'
                 try:
                     from torchao.quantization import (
                         Int8DynamicActivationInt8WeightConfig,
                         quantize_,
                     )
-                except ImportError as exc:
-                    raise RuntimeError(
-                        'quantize_cpu_heads=true requires torchao; install requirements-runtime.txt'
-                    ) from exc
 
-                seen = set()
+                    def _quantize_one(module: torch.nn.Module) -> torch.nn.Module:
+                        module = module.cpu().eval()
+                        quantize_(module, Int8DynamicActivationInt8WeightConfig())
+                        return module
+                except Exception as exc:
+                    quantizer_name = 'torch.ao.dynamic'
+                    logging.warning(
+                        'TorchAO unavailable/incompatible (%s); falling back to PyTorch dynamic INT8',
+                        exc,
+                    )
+
+                    def _quantize_one(module: torch.nn.Module) -> torch.nn.Module:
+                        module = module.cpu().eval()
+                        return torch.ao.quantization.quantize_dynamic(
+                            module, {torch.nn.Linear}, dtype=torch.qint8, inplace=False
+                        )
+
                 for collection_name in ('diagnosisheads', 'referralheads'):
                     collection = getattr(full_model, collection_name, {})
-                    for name, item in collection.items():
-                        head = item[0]
-                        if id(head) in seen:
-                            continue
-                        seen.add(id(head))
-                        head.cpu().eval()
-                        quantize_(head, Int8DynamicActivationInt8WeightConfig())
-                        logging.info('INT8-quantized CPU head %s/%s', collection_name, name)
-                if id(full_model.priorityhead) not in seen:
-                    full_model.priorityhead.cpu().eval()
-                    quantize_(
-                        full_model.priorityhead,
-                        Int8DynamicActivationInt8WeightConfig(),
+                    for name, item in list(collection.items()):
+                        head, idx = item
+                        thresh = getattr(head, 'thresh', 0.0)
+                        quantized = _quantize_one(head)
+                        quantized.thresh = thresh
+                        collection[name] = [quantized, idx]
+                        logging.info(
+                            'INT8-quantized CPU head %s/%s via %s',
+                            collection_name, name, quantizer_name,
+                        )
+
+                full_model.priorityhead = _quantize_one(full_model.priorityhead)
+                if hasattr(full_model, 'm1'):
+                    full_model.m1 = torch.nn.ModuleList(
+                        [item[0] for item in full_model.diagnosisheads.values()]
                     )
-                    logging.info('INT8-quantized CPU priority head')
+                if hasattr(full_model, 'm2'):
+                    full_model.m2 = torch.nn.ModuleList(
+                        [item[0] for item in full_model.referralheads.values()]
+                    )
+                if hasattr(full_model, 'diagnosis_modules'):
+                    full_model.diagnosis_modules = torch.nn.ModuleList(
+                        [item[0] for item in full_model.diagnosisheads.values()]
+                    )
+                if hasattr(full_model, 'referral_modules'):
+                    full_model.referral_modules = torch.nn.ModuleList(
+                        [item[0] for item in full_model.referralheads.values()]
+                    )
+                logging.info('INT8 CPU task-head quantization complete via %s', quantizer_name)
 
             def _place_model(full_model: torch.nn.Module) -> torch.nn.Module:
                 if hasattr(full_model, 'module'):
