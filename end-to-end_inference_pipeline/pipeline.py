@@ -629,12 +629,12 @@ class Pipeline:
                             "fail_on_series_error=true"
                         ) from exc
                     self.metrics["skipped_series"].append(
-                        {"index": idx, "name": name, "reason": str(exc)}
+                        {"index": idx, "name": display_name, "reason": str(exc)}
                     )
                     self.logger.warning(
                         "Skipping streamed series index=%s name=%s: %s",
                         idx,
-                        name,
+                        display_name,
                         exc,
                         exc_info=True,
                     )
