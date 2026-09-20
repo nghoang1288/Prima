@@ -101,6 +101,15 @@ def adjusted_patch_shape(
                 patch_shape[z_idx] = z_val
                 break
 
+        # End-to-end DICOM volumes enter this function as SimpleITK NumPy
+        # arrays in z,y,x order after in-plane resize to 256x256. If the slice
+        # count is also exactly 256, all dimensions are equal and the historical
+        # heuristic returned None (later interpreted as the last axis). Default
+        # to array axis 0, which is the DICOM slice axis for this runtime.
+        if z_idx is None:
+            z_idx = 0
+            patch_shape[z_idx] = z_val
+
         return patch_shape, z_idx
     except Exception as e:
         raise RuntimeError(f"Failed to adjust patch shape: {str(e)}")
