@@ -55,6 +55,7 @@ def main() -> None:
     report: Dict[str, Any] = {"groups": {}}
     all_diffs = []
     total_flips = 0
+    missing_output_count = 0
 
     for group in ("diagnosis", "referral"):
         rows, flips = compare_group(
@@ -63,6 +64,9 @@ def main() -> None:
             track_zero_flip=True,
         )
         report["groups"][group] = rows
+        missing_output_count += sum(
+            1 for item in rows.values() if item.get("missing")
+        )
         total_flips += flips
         all_diffs.extend(
             item["abs_diff"]
@@ -76,16 +80,20 @@ def main() -> None:
         track_zero_flip=False,
     )
     report["groups"]["priority"] = priority_rows
+    missing_output_count += sum(
+        1 for item in priority_rows.values() if item.get("missing")
+    )
     all_diffs.extend(
         item["abs_diff"]
         for item in priority_rows.values()
         if "abs_diff" in item
     )
 
-    priority_labels = sorted(
-        set(a.get("priority", {})) & set(b.get("priority", {}))
-    )
-    if priority_labels:
+    baseline_priority_labels = set(a.get("priority", {}))
+    candidate_priority_labels = set(b.get("priority", {}))
+    same_priority_labels = baseline_priority_labels == candidate_priority_labels
+    if same_priority_labels and baseline_priority_labels:
+        priority_labels = sorted(baseline_priority_labels)
         baseline_priority = {
             label: scalar(a["priority"][label]) for label in priority_labels
         }
@@ -95,15 +103,24 @@ def main() -> None:
         baseline_label = max(baseline_priority, key=baseline_priority.get)
         candidate_label = max(candidate_priority, key=candidate_priority.get)
         report["priority_decision"] = {
+            "comparable": True,
             "baseline": baseline_label,
             "candidate": candidate_label,
             "changed": baseline_label != candidate_label,
+        }
+    else:
+        report["priority_decision"] = {
+            "comparable": False,
+            "baseline_labels": sorted(baseline_priority_labels),
+            "candidate_labels": sorted(candidate_priority_labels),
+            "changed": None,
         }
 
     report["summary"] = {
         "max_abs_diff": max(all_diffs) if all_diffs else 0.0,
         "mean_abs_diff": float(np.mean(all_diffs)) if all_diffs else 0.0,
         "threshold_sign_flips_at_zero": total_flips,
+        "missing_output_count": missing_output_count,
     }
 
     if "clip_emb" in a and "clip_emb" in b:
