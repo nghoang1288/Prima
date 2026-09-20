@@ -59,8 +59,9 @@ def uid_hash(value: str) -> str:
     return hashlib.sha256(value.encode("utf-8")).hexdigest()[:10]
 
 
-def scan(source: Path) -> Tuple[Dict[str, List[Path]], str, str, Dict[str, int]]:
+def scan(source: Path):
     groups: Dict[str, List[Path]] = defaultdict(list)
+    series_numbers: Dict[str, int | None] = {}
     study_uids = set()
     study_descriptions = set()
     skipped_modalities: Dict[str, int] = defaultdict(int)
@@ -76,6 +77,7 @@ def scan(source: Path) -> Tuple[Dict[str, List[Path]], str, str, Dict[str, int]]
         series_uid = str(getattr(ds, "SeriesInstanceUID", "") or "")
         modality = str(getattr(ds, "Modality", "") or "").upper()
         description = str(getattr(ds, "StudyDescription", "") or "").strip()
+        raw_series_number = getattr(ds, "SeriesNumber", None)
 
         if not study_uid or not series_uid:
             continue
@@ -83,10 +85,17 @@ def scan(source: Path) -> Tuple[Dict[str, List[Path]], str, str, Dict[str, int]]
             skipped_modalities[modality or "<blank>"] += 1
             continue
 
+        try:
+            series_number = int(raw_series_number)
+        except (TypeError, ValueError):
+            series_number = None
+
         study_uids.add(study_uid)
         if description:
             study_descriptions.add(description)
         groups[series_uid].append(path)
+        if series_uid not in series_numbers or series_numbers[series_uid] is None:
+            series_numbers[series_uid] = series_number
 
     if not groups:
         raise RuntimeError("No readable MR DICOM series found")
@@ -102,7 +111,13 @@ def scan(source: Path) -> Tuple[Dict[str, List[Path]], str, str, Dict[str, int]]
         if len(study_descriptions) == 1
         else ""
     )
-    return groups, next(iter(study_uids)), description, dict(skipped_modalities)
+    return (
+        groups,
+        next(iter(study_uids)),
+        description,
+        dict(skipped_modalities),
+        series_numbers,
+    )
 
 
 def main() -> None:
@@ -131,11 +146,25 @@ def main() -> None:
         shutil.rmtree(destination)
     destination.mkdir(parents=True)
 
-    groups, study_uid, study_description, skipped_modalities = scan(source)
+    (
+        groups,
+        study_uid,
+        study_description,
+        skipped_modalities,
+        series_numbers,
+    ) = scan(source)
 
     series_rows = []
+    ordered_series = sorted(
+        groups.items(),
+        key=lambda item: (
+            series_numbers.get(item[0]) is None,
+            series_numbers.get(item[0]) if series_numbers.get(item[0]) is not None else 0,
+            item[0],
+        ),
+    )
     for series_index, (series_uid, files) in enumerate(
-        sorted(groups.items(), key=lambda item: item[0]),
+        ordered_series,
         start=1,
     ):
         series_dir = destination / f"series_{series_index:04d}_{uid_hash(series_uid)}"
@@ -149,6 +178,7 @@ def main() -> None:
             {
                 "series_index": series_index,
                 "series_uid_hash": uid_hash(series_uid),
+                "series_number": series_numbers.get(series_uid),
                 "file_count": len(files),
             }
         )
