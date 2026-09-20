@@ -1,3 +1,4 @@
+import logging
 import os
 import torch
 import math
@@ -18,6 +19,10 @@ try:
 except ImportError:
     flash_attn_qkvpacked_func = None
     flash_attn_varlen_qkvpacked_func = None
+# Avoid repeating the same backend line for every transformer layer.
+_REPORTED_ATTENTION_BACKENDS = set()
+
+
 # helpers
 
 
@@ -184,6 +189,16 @@ class Attention(nn.Module):
 
         if backend == 'sdpa':
             out = sdpa_varlen(qkv, cu, dropout_p=dropout_p, causal=self.causal)
+
+        report_key = (backend, str(x.device), str(x.dtype))
+        if report_key not in _REPORTED_ATTENTION_BACKENDS:
+            _REPORTED_ATTENTION_BACKENDS.add(report_key)
+            logging.info(
+                "PRIMA attention backend: %s device=%s dtype=%s",
+                backend,
+                x.device,
+                x.dtype,
+            )
 
         out = out.flatten(start_dim=1)
         assert out.ndim == 2
