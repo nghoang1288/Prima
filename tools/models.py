@@ -45,31 +45,59 @@ class FullMRIModel(torch.nn.Module):
 
         self.priorityhead = torch.load(config["priority_head_ckpt"], map_location="cpu")
 
-    def forward(self, x: Dict[str, Any], inference_only_once = False) -> Dict[str, Any]:
+    @torch.no_grad()
+    def forward(
+        self,
+        x: Dict[str, Any],
+        inference_only_once: bool = False,
+        heads_on_cpu: bool = False,
+    ) -> Dict[str, Any]:
+        """Run the visual encoder and task heads.
+
+        When heads_on_cpu=True only the visual backbone needs to reside on the GPU.
+        The study embedding is copied to CPU once, and all diagnosis/referral/
+        priority heads are evaluated in float32 on CPU. This avoids moving the
+        many task heads into VRAM for single-study inference.
+        """
         print("Running CLIP embeddings ...")
         clip_embed = self.clipvisualmodel(x, retpool=True)
+        cpu_embed = clip_embed.detach().float().cpu() if heads_on_cpu else None
+
         retdict = {
             "diagnosis": {},
             "referral": {},
             "priority": {},
-            "clip_emb": clip_embed.detach().cpu(),
+            "clip_emb": clip_embed.detach().float().cpu(),
         }
+
         print("Running diagnostic heads ...")
         for name in tqdm(self.diagnosisheads):
             head, idx = self.diagnosisheads[name]
-            device_head = head.to(clip_embed.device)
-            retdict["diagnosis"][name] = device_head(clip_embed)[:, idx] - head.thresh
-            if inference_only_once: # doing this to save GPU memory
-                device_head = device_head.cpu()
+            if heads_on_cpu:
+                head = head.cpu()
+                retdict["diagnosis"][name] = head(cpu_embed)[:, idx] - head.thresh
+            else:
+                device_head = head.to(clip_embed.device)
+                retdict["diagnosis"][name] = device_head(clip_embed)[:, idx] - head.thresh
+                if inference_only_once:
+                    device_head.cpu()
+
         print("Running referral heads ...")
         for name in tqdm(self.referralheads):
             head, idx = self.referralheads[name]
-            device_head = head.to(clip_embed.device)
-            retdict["referral"][name] = device_head(clip_embed)[:, idx] - head.thresh
-            if inference_only_once: # doing this to save GPU memory
-                device_head = device_head.cpu()
-        print("Running priorization heads ...")
-        priorityout = self.priorityhead(clip_embed)
+            if heads_on_cpu:
+                head = head.cpu()
+                retdict["referral"][name] = head(cpu_embed)[:, idx] - head.thresh
+            else:
+                device_head = head.to(clip_embed.device)
+                retdict["referral"][name] = device_head(clip_embed)[:, idx] - head.thresh
+                if inference_only_once:
+                    device_head.cpu()
+
+        print("Running prioritization head ...")
+        priority_head = self.priorityhead.cpu() if heads_on_cpu else self.priorityhead.to(clip_embed.device)
+        priority_input = cpu_embed if heads_on_cpu else clip_embed
+        priorityout = priority_head(priority_input)
         if len(priorityout[0]) == 4:
             retdict["priority"]["none"] = priorityout[:, 0]
             retdict["priority"]["low"] = priorityout[:, 1]
@@ -79,6 +107,7 @@ class FullMRIModel(torch.nn.Module):
             retdict["priority"]["none"] = priorityout[:, 0]
             retdict["priority"]["low"] = priorityout[:, 1]
             retdict["priority"]["high"] = priorityout[:, 2]
+
         return retdict
 
     def forward_one_diag_only(self, x: Dict[str, Any], diagname: str) -> torch.Tensor:
@@ -367,7 +396,12 @@ class ModelLoader:
             raise RuntimeError(f"Failed to load classification heads: {str(e)}")
 
     @staticmethod
-    def load_full_prima_model(config: Dict[str, Any]) -> torch.nn.Module:
+    def load_full_prima_model(
+        config: Dict[str, Any],
+        device: Optional[str] = None,
+        low_vram: bool = False,
+        visual_dtype: str = "float16",
+    ) -> torch.nn.Module:
         """
         Load the complete PRIMA model (FullMRIModel).
         
@@ -381,6 +415,47 @@ class ModelLoader:
         try:
             if not config:
                 raise ValueError("Empty configuration provided")
+
+            target_device = torch.device(
+                device if device is not None
+                else ("cuda" if torch.cuda.is_available() else "cpu")
+            )
+
+            dtype_map = {
+                "float16": torch.float16,
+                "fp16": torch.float16,
+                "bfloat16": torch.bfloat16,
+                "bf16": torch.bfloat16,
+                "float32": torch.float32,
+                "fp32": torch.float32,
+            }
+            if visual_dtype.lower() not in dtype_map:
+                raise ValueError(
+                    f"Unsupported visual_dtype={visual_dtype!r}; "
+                    f"use one of {sorted(dtype_map)}"
+                )
+
+            def _place_model(full_model: torch.nn.Module) -> torch.nn.Module:
+                if hasattr(full_model, "module"):
+                    full_model = full_model.module
+
+                if low_vram and target_device.type == "cuda":
+                    # Keep the large collection of task heads and unused CLIP text
+                    # components in system RAM. Only the visual backbone is needed
+                    # on CUDA to obtain the study embedding.
+                    full_model = full_model.cpu()
+                    full_model.clipvisualmodel.to(
+                        device=target_device,
+                        dtype=dtype_map[visual_dtype.lower()],
+                    )
+                    logging.info(
+                        "Low-VRAM placement enabled: visual backbone=%s/%s; task heads=cpu",
+                        target_device,
+                        visual_dtype,
+                    )
+                    return full_model
+
+                return full_model.to(target_device)
 
             # Single full-model checkpoint: path is given in config (e.g. from pipeline config file)
             if "full_model_ckpt" in config:
@@ -454,17 +529,11 @@ class ModelLoader:
                             setattr(_main, "FullMRIModel", _saved_main_fullmri)
                         elif hasattr(_main, "FullMRIModel") and getattr(_main, "FullMRIModel") is FullMRIModel:
                             delattr(_main, "FullMRIModel")
-                if hasattr(full_model, "module"):
-                    full_model = full_model.module
-                device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-                full_model = full_model.to(device)
-                return full_model
+                return _place_model(full_model)
 
             # Build from components
             full_model = FullMRIModel(config)
-            device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-            full_model = full_model.to(device)
-            return full_model
+            return _place_model(full_model)
 
         except Exception as e:
             msg = str(e)
