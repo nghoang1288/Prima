@@ -1,0 +1,56 @@
+{
+  "schema_version": 1,
+  "task_id": "PRIMA-20260920-003",
+  "agent_id": "antigravity-windows-01",
+  "status": "success",
+  "started_at": "2026-09-21T00:04:00+07:00",
+  "finished_at": "2026-09-21T00:05:00+07:00",
+  "code": {
+    "branch": "modern-runtime",
+    "sha": "99cd62ccfadccb6c6e52a9f09977eb9f1f3391cf"
+  },
+  "checks": [
+    {
+      "name": "verify_modern_runtime_sha",
+      "status": "pass",
+      "detail": "origin/modern-runtime verified at 99cd62ccfadccb6c6e52a9f09977eb9f1f3391cf"
+    },
+    {
+      "name": "report_rendering_tests",
+      "status": "pass",
+      "detail": "tests/test_render_report.py passed (9 passed in 4.08s on exact SHA worktree)"
+    },
+    {
+      "name": "raw_predictions_unmodified",
+      "status": "pass",
+      "detail": "Verified local CASE001_predictions.json and runtime_metrics.json were reused without modification"
+    },
+    {
+      "name": "radiologist_first_report_generation",
+      "status": "pass",
+      "detail": "Regenerated CASE001_report.md and CASE001_report.html using updated tools/render_report.py"
+    },
+    {
+      "name": "report_content_validation",
+      "status": "pass",
+      "detail": "Validated presence of radiologist-first Vietnamese sections ('Đọc nhanh', 'Các nhãn PRIMA vượt ngưỡng', 'Gợi ý hội chẩn / chuyên khoa', 'Giới hạn cần nhớ khi đọc kết quả') with raw model codes and margins hidden"
+    },
+    {
+      "name": "patient_safety_isolation",
+      "status": "pass",
+      "detail": "Zero PHI, patient identifiers, local patient paths, or clinical report text pushed to GitHub"
+    }
+  ],
+  "artifacts": {
+    "code_branch": null,
+    "commit_sha": null,
+    "pull_request": null
+  },
+  "metrics": {
+    "test_pass_count": 9,
+    "html_report_size_bytes": 3816,
+    "md_report_size_bytes": 1785
+  },
+  "blockers": [],
+  "next_recommendation": "Task PRIMA-20260920-003 complete. Radiologist-first report format successfully regenerated and validated locally for CASE001."
+}
