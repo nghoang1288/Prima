@@ -1,0 +1,60 @@
+{
+  "schema_version": 1,
+  "task_id": "PRIMA-20260921-005",
+  "created_at": "2026-09-21T07:18:00+07:00",
+  "target_agent": "antigravity",
+  "status": "pending",
+  "supersedes": "PRIMA-20260921-004",
+  "code": {
+    "branch": "antigravity/prima-20260921-004",
+    "base_sha": "7cb7b30202352dd66558973b19a0e74df594f5be"
+  },
+  "execution": {
+    "mode": "code_change",
+    "requires_user_approval": false,
+    "local_aliases_only": true,
+    "instructions": [
+      "Read ANTIGRAVITY_BRIDGE.md from origin/agent-control before execution.",
+      "Fetch the task-004 working branch and verify exact code.base_sha.",
+      "Create antigravity/prima-20260921-005 from the exact base SHA.",
+      "Keep the task-004 evidence panel concept as a review aid, but improve it for radiologist use before any merge.",
+      "For each positive diagnosis, allow up to three clinically distinct preferred sequence families rather than only the single highest-ranked series. Example ischemia: DWI + ADC + FLAIR; hemorrhage: SWI/SWAN/T2* + FLAIR; tumor: post-contrast T1 + FLAIR/T2 + DWI when available.",
+      "Do not show arbitrary fallback series for diagnoses whose preferred evidence sequence is absent. It is better to say no suitable review series found than to show a misleading T2 image.",
+      "Add diagnosis-specific overrides where group-level mapping is insufficient. At minimum review Moyamoya, aneurysm, AVM/cavernoma, sellar lesions, ventriculomegaly, atrophy, small-vessel disease, and postoperative findings.",
+      "Standardize loaded DICOM volumes to a consistent LPS orientation before thumbnail extraction when SimpleITK permits it.",
+      "Make the thumbnail display explicitly radiological: patient Right on image left and patient Left on image right, with visible R/L markers. Add orientation/slice labels without burning PHI.",
+      "Make thumbnails clickable to open a larger local image. Keep the HTML fully offline.",
+      "Deduplicate identical series/slice thumbnails across labels where practical while preserving per-label recommended sequences.",
+      "Keep the main wording as 'ảnh gợi ý rà lại' / 'lát cắt tiêu biểu'; do not imply model localization or proof.",
+      "Add synthetic tests for multi-series selection, no-misleading-fallback behavior, LPS orientation handling, R/L annotation, deduplication, and safe clickable relative paths.",
+      "Re-render CASE001 locally using existing predictions and staged DICOM; do not rerun PRIMA inference.",
+      "Verify the report remains readable when several labels share the same preferred series.",
+      "Push only code/tests to GitHub. Patient thumbnails/report/DICOM/series descriptions remain local only."
+    ],
+    "commands": [
+      "git fetch origin antigravity/prima-20260921-004 agent-control",
+      "git rev-parse origin/antigravity/prima-20260921-004",
+      "python -m pytest -q tests/test_render_evidence.py tests/test_render_report.py"
+    ]
+  },
+  "safety": {
+    "allow_patient_data_read_local": true,
+    "allow_patient_derived_output_on_github": false,
+    "allow_destructive_workspace_ops": false,
+    "allow_merge": false,
+    "allow_force_push_code": false
+  },
+  "acceptance": [
+    "Base branch SHA equals 7cb7b30202352dd66558973b19a0e74df594f5be",
+    "A new working branch antigravity/prima-20260921-005 is created",
+    "Evidence panels can show multiple clinically distinct preferred sequences per positive label",
+    "Missing preferred sequences do not trigger misleading generic fallback thumbnails",
+    "DICOM thumbnail extraction uses consistent orientation and visible R/L markers",
+    "Thumbnails are clickable through safe relative local paths",
+    "Synthetic evidence/report tests pass",
+    "CASE001 is re-rendered locally without rerunning PRIMA inference",
+    "No patient-derived data or local series names are pushed to GitHub",
+    "A terminal result is pushed to .antigravity/results/PRIMA-20260921-005.json"
+  ],
+  "result_path": ".antigravity/results/PRIMA-20260921-005.json"
+}
