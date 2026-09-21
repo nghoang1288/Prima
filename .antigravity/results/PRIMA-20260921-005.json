@@ -1,0 +1,87 @@
+{
+  "schema_version": 1,
+  "task_id": "PRIMA-20260921-005",
+  "agent_id": "antigravity-windows-01",
+  "status": "success",
+  "started_at": "2026-09-21T07:26:40+07:00",
+  "finished_at": "2026-09-21T07:34:00+07:00",
+  "code": {
+    "branch": "antigravity/prima-20260921-004",
+    "base_sha": "7cb7b30202352dd66558973b19a0e74df594f5be"
+  },
+  "checks": [
+    {
+      "name": "verify_base_sha",
+      "status": "pass",
+      "detail": "Verified base SHA 7cb7b30202352dd66558973b19a0e74df594f5be on origin/antigravity/prima-20260921-004"
+    },
+    {
+      "name": "working_branch_created",
+      "status": "pass",
+      "detail": "Created and pushed working branch antigravity/prima-20260921-005 to origin"
+    },
+    {
+      "name": "multi_series_support",
+      "status": "pass",
+      "detail": "Implemented select_multi_series_for_diagnosis supporting up to 3 clinically distinct sequence families per positive diagnosis (e.g. DWI + ADC + FLAIR; SWI/SWAN + FLAIR + T2; post-contrast T1 + FLAIR/T2 + DWI)"
+    },
+    {
+      "name": "no_misleading_fallback",
+      "status": "pass",
+      "detail": "Strictly disabled arbitrary fallback series; displays explicit notice when no suitable sequence family matches"
+    },
+    {
+      "name": "diagnosis_specific_overrides",
+      "status": "pass",
+      "detail": "Implemented diagnosis-specific overrides for Moyamoya, aneurysm, AVM, cavernoma, sellar lesions, ventriculomegaly, cerebral atrophy, small vessel disease, and postoperative findings"
+    },
+    {
+      "name": "lps_orientation_standardization",
+      "status": "pass",
+      "detail": "Standardized DICOM volume reading to consistent LPS orientation using SimpleITK DICOMOrient"
+    },
+    {
+      "name": "radiological_viewing_and_markers",
+      "status": "pass",
+      "detail": "Configured radiological view with visible R/L markers: patient Right on image left and patient Left on image right"
+    },
+    {
+      "name": "clickable_offline_thumbnails",
+      "status": "pass",
+      "detail": "Wrapped thumbnails in local relative links (<a>) allowing click-to-enlarge offline without external dependencies"
+    },
+    {
+      "name": "thumbnail_deduplication",
+      "status": "pass",
+      "detail": "Deduplicated identical series/slice thumbnails across positive labels via thumbnail_cache"
+    },
+    {
+      "name": "synthetic_regression_tests",
+      "status": "pass",
+      "detail": "All 22 unit and regression tests in tests/test_render_evidence.py and tests/test_render_report.py passed, and full test suite (51 tests) passed"
+    },
+    {
+      "name": "local_case001_rerender",
+      "status": "pass",
+      "detail": "Locally re-rendered CASE001_report.html using existing CASE001_predictions.json without rerunning inference"
+    },
+    {
+      "name": "patient_safety_isolation",
+      "status": "pass",
+      "detail": "Strict zero-PHI isolation maintained; no DICOM, thumbnails, series names, patient reports, patient identifiers, local paths, or logits pushed to GitHub"
+    }
+  ],
+  "artifacts": {
+    "code_branch": "antigravity/prima-20260921-005",
+    "commit_sha": "fa0bf6def41c72ccbde1d0ad81fef2e28b5647c1",
+    "pull_request": "https://github.com/nghoang1288/Prima/pull/new/antigravity/prima-20260921-005"
+  },
+  "metrics": {
+    "evidence_test_pass_count": 22,
+    "full_suite_pass_count": 51,
+    "positive_labels_evaluated": 6,
+    "total_deduplicated_thumbnails_local": 21
+  },
+  "blockers": [],
+  "next_recommendation": "Task PRIMA-20260921-005 complete. Radiologist review-aid evidence panel hardened with multi-series support, diagnosis overrides, strict no-misleading-fallback, LPS standardization, R/L markers, clickable offline links, and thumbnail deduplication."
+}
