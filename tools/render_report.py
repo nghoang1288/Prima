@@ -506,11 +506,17 @@ small {{ opacity:.7; }}
 .evidence-disclaimer {{ margin-bottom:16px; font-size:14px; }}
 .evidence-item {{ margin-bottom:24px; padding-bottom:16px; border-bottom:1px dashed #e0e0e0; }}
 .evidence-item:last-child {{ border-bottom:none; }}
-.evidence-meta {{ font-size:14px; color:#555; margin:4px 0 10px 0; }}
-.evidence-grid {{ display:flex; flex-wrap:wrap; gap:12px; margin:8px 0; }}
-.evidence-card {{ display:flex; flex-direction:column; align-items:center; background:#f8f9fa; padding:6px; border-radius:8px; border:1px solid #e2e4e8; }}
-.evidence-card img {{ width:140px; height:140px; object-fit:cover; border-radius:4px; display:block; }}
-.evidence-card span {{ font-size:11px; margin-top:5px; color:#555; font-weight:500; }}
+.evidence-meta, .evidence-seq-meta {{ font-size:14px; color:#555; margin:6px 0 10px 0; }}
+.evidence-none {{ font-size:14px; color:#777; margin:8px 0; }}
+.evidence-grid {{ display:flex; flex-wrap:wrap; gap:14px; margin:8px 0 16px 0; }}
+.evidence-card {{ display:flex; flex-direction:column; align-items:center; background:#f8f9fa; padding:8px; border-radius:8px; border:1px solid #e2e4e8; }}
+.thumb-container {{ position:relative; display:inline-block; width:150px; height:150px; background:#000; border-radius:4px; overflow:hidden; }}
+.thumb-container a {{ display:block; width:100%; height:100%; }}
+.thumb-container img {{ width:100%; height:100%; object-fit:cover; border-radius:4px; display:block; }}
+.marker {{ position:absolute; top:50%; transform:translateY(-50%); font-family:system-ui,-apple-system,sans-serif; font-weight:700; font-size:13px; color:#ffeb3b; text-shadow:0 0 3px #000, 0 0 5px #000; pointer-events:none; z-index:2; user-select:none; }}
+.marker-r {{ left:6px; }}
+.marker-l {{ right:6px; }}
+.thumb-caption {{ font-size:11px; margin-top:6px; color:#555; font-weight:500; text-align:center; }}
 @media (prefers-color-scheme: dark) {{
   body {{ background:#15171a; color:#e8eaed; }}
   main {{ background:#202124; box-shadow:none; }}
@@ -518,9 +524,10 @@ small {{ opacity:.7; }}
   .notice {{ background:#2b2d31; }}
   code {{ background:#303134; }}
   .evidence-item {{ border-color:#3c4043; }}
-  .evidence-meta {{ color:#aaa; }}
+  .evidence-meta, .evidence-seq-meta {{ color:#aaa; }}
+  .evidence-none {{ color:#888; }}
   .evidence-card {{ background:#2a2b2e; border-color:#3c4043; }}
-  .evidence-card span {{ color:#aaa; }}
+  .thumb-caption {{ color:#aaa; }}
 }}
 @media print {{
   body {{ background:white; }}
