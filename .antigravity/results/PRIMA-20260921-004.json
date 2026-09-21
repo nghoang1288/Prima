@@ -44,11 +44,16 @@
       "name": "patient_safety_isolation",
       "status": "pass",
       "detail": "Zero DICOM, thumbnails, series names, patient reports, patient identifiers, local paths, or per-label logits pushed to GitHub"
+    },
+    {
+      "name": "result_metadata_correction",
+      "status": "pass",
+      "detail": "Corrected working-branch commit SHA to match the actual Git ref; no patient-derived content changed."
     }
   ],
   "artifacts": {
     "code_branch": "antigravity/prima-20260921-004",
-    "commit_sha": "7cb7b30965e64860d2b992f4aa19bb7d22384a86",
+    "commit_sha": "7cb7b30202352dd66558973b19a0e74df594f5be",
     "pull_request": "https://github.com/nghoang1288/Prima/pull/new/antigravity/prima-20260921-004"
   },
   "metrics": {
